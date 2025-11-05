@@ -1,0 +1,59 @@
+namespace quanlyfilesBE.DTOs;
+
+public class UserDto
+{
+    public int UserId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public string? FullName { get; set; }
+    public string? Email { get; set; }
+    public string? FirebaseUID { get; set; }
+    public bool IsActive { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public List<string> Roles { get; set; } = new List<string>();
+}
+
+public class UserCreateDto
+{
+    public string UserName { get; set; } = string.Empty;
+    public string? FullName { get; set; }
+    public string? Email { get; set; }
+    public string? FirebaseUID { get; set; }
+    public string? Password { get; set; }
+    public List<int>? RoleIds { get; set; }
+}
+
+public class UserUpdateDto
+{
+    public string? UserName { get; set; }
+    public string? FullName { get; set; }
+    public string? Email { get; set; }
+    public bool? IsActive { get; set; }
+    public List<int>? RoleIds { get; set; }
+}
+
+public class CreateUserWithFirebaseDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public List<string> Roles { get; set; } = new List<string>();
+}
+
+public class UpdateUserRolesDto
+{
+    public List<string> Roles { get; set; } = new List<string>();
+}
+
+public class SetCustomClaimsDto
+{
+    public List<string> Roles { get; set; } = new List<string>();
+    public string? Name { get; set; }
+}
+
+public class SyncUserFromFirebaseDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public List<string> Roles { get; set; } = new List<string>();
+}
+

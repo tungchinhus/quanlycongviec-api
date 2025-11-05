@@ -22,6 +22,9 @@ public class User
     [MaxLength(200)]
     public string? Email { get; set; }
 
+    [MaxLength(200)]
+    public string? FirebaseUID { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

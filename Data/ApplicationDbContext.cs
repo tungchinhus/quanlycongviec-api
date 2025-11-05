@@ -61,6 +61,7 @@ public class ApplicationDbContext : DbContext
             entity.ToTable("Users");
             entity.HasKey(e => e.UserId);
             entity.HasIndex(e => e.UserName).IsUnique();
+            entity.HasIndex(e => e.FirebaseUID).IsUnique();
         });
 
         // Roles

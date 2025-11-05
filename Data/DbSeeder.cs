@@ -40,6 +40,34 @@ public static class DbSeeder
         {
             await db.SaveChangesAsync();
         }
+
+        // Seed default Admin user if none exists
+        if (!await db.Users.AnyAsync())
+        {
+            var adminRole = await db.Roles.FirstAsync(r => r.RoleName == "Admin");
+
+            var adminUser = new User
+            {
+                UserName = "admin",
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin@123"),
+                FullName = "System Administrator",
+                Email = "admin@example.com",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            db.Users.Add(adminUser);
+            await db.SaveChangesAsync();
+
+            db.UserRoles.Add(new UserRole
+            {
+                UserId = adminUser.UserId,
+                RoleId = adminRole.RoleId,
+                AssignedAt = DateTime.UtcNow
+            });
+
+            await db.SaveChangesAsync();
+        }
     }
 }
 

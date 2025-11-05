@@ -1,3 +1,22 @@
+# Firebase service account keys (DO NOT COMMIT)
+service-account-key.json
+**/service-account-key.json
+
+# User secrets and local config overrides
+secrets.json
+**/secrets.json
+
+# Build outputs
+bin/
+obj/
+
+# IDE
+.vscode/
+.idea/
+*.user
+*.suo
+*.swp
+*.DS_Store
 # Build results
 bin/
 obj/

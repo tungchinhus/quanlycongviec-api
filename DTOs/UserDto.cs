@@ -57,3 +57,13 @@ public class SyncUserFromFirebaseDto
     public List<string> Roles { get; set; } = new List<string>();
 }
 
+public class UserCreateSimpleDto
+{
+    public string UserName { get; set; } = string.Empty;
+    public string? FullName { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public string? Role { get; set; } // Single role name (e.g., "User", "Admin", "Manager")
+    public List<string>? Roles { get; set; } // Array of role names (e.g., ["User"], ["Admin"], ["User", "Manager"])
+}
+

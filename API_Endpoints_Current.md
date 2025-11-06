@@ -376,6 +376,226 @@
 
 ---
 
+## 🔐 Roles Management APIs (`/api/roles`)
+
+**Lưu ý**: Tất cả endpoints trong phần này yêu cầu role "Admin" (`[Authorize(Roles = "Admin")]`)
+
+### 1. Lấy danh sách Roles
+**GET** `/api/roles`
+- **Authorization**: Cần JWT Token với role "Admin"
+- **Response**: `200 OK`
+```json
+[
+  {
+    "roleId": 1,
+    "roleName": "Admin",
+    "description": "Administrator role",
+    "permissions": ["files.view", "files.manage", "users.manage"]
+  },
+  {
+    "roleId": 2,
+    "roleName": "User",
+    "description": "Regular user role",
+    "permissions": ["files.view"]
+  }
+]
+```
+
+### 2. Lấy Role theo ID
+**GET** `/api/roles/{id}`
+- **Authorization**: Cần JWT Token với role "Admin"
+- **Response**: `200 OK` hoặc `404 Not Found`
+```json
+{
+  "roleId": 1,
+  "roleName": "Admin",
+  "description": "Administrator role",
+  "permissions": ["files.view", "files.manage", "users.manage"]
+}
+```
+
+### 3. Tạo Role mới
+**POST** `/api/roles`
+- **Authorization**: Cần JWT Token với role "Admin"
+- **Request Body**:
+```json
+{
+  "roleName": "Manager",
+  "description": "Manager role with limited permissions"
+}
+```
+- **Response**: `201 Created`
+```json
+{
+  "roleId": 3,
+  "roleName": "Manager",
+  "description": "Manager role with limited permissions",
+  "permissions": []
+}
+```
+
+### 4. Cập nhật Role
+**PUT** `/api/roles/{id}`
+- **Authorization**: Cần JWT Token với role "Admin"
+- **Request Body**:
+```json
+{
+  "roleName": "Updated Manager",
+  "description": "Updated description"
+}
+```
+- **Response**: `200 OK`
+```json
+{
+  "roleId": 3,
+  "roleName": "Updated Manager",
+  "description": "Updated description",
+  "permissions": ["files.view"]
+}
+```
+
+### 5. Xóa Role
+**DELETE** `/api/roles/{id}`
+- **Authorization**: Cần JWT Token với role "Admin"
+- **Response**: `204 No Content` hoặc `400 Bad Request` (nếu role đang được sử dụng bởi users)
+- **Error Response** (400):
+```json
+{
+  "error": "Cannot delete role that is assigned to users"
+}
+```
+
+### 6. Lấy Permissions của Role
+**GET** `/api/roles/{roleId}/permissions`
+- **Authorization**: Cần JWT Token với role "Admin"
+- **Response**: `200 OK`
+```json
+[
+  {
+    "permissionId": 1,
+    "permissionName": "files.view",
+    "description": "View files permission"
+  },
+  {
+    "permissionId": 2,
+    "permissionName": "files.manage",
+    "description": "Manage files permission"
+  }
+]
+```
+
+### 7. Gán Permissions cho Role
+**PUT** `/api/roles/{roleId}/permissions`
+- **Authorization**: Cần JWT Token với role "Admin"
+- **Request Body**:
+```json
+{
+  "permissionIds": [1, 2, 3]
+}
+```
+- **Response**: `200 OK`
+```json
+{
+  "roleId": 1,
+  "roleName": "Admin",
+  "description": "Administrator role",
+  "permissions": ["files.view", "files.manage", "users.manage"]
+}
+```
+
+---
+
+## 🔐 Permissions Management APIs (`/api/permissions`)
+
+**Lưu ý**: Tất cả endpoints trong phần này yêu cầu role "Admin" (`[Authorize(Roles = "Admin")]`)
+
+### 1. Lấy danh sách Permissions
+**GET** `/api/permissions`
+- **Authorization**: Cần JWT Token với role "Admin"
+- **Response**: `200 OK`
+```json
+[
+  {
+    "permissionId": 1,
+    "permissionName": "files.view",
+    "description": "View files permission"
+  },
+  {
+    "permissionId": 2,
+    "permissionName": "files.manage",
+    "description": "Manage files permission"
+  },
+  {
+    "permissionId": 3,
+    "permissionName": "users.manage",
+    "description": "Manage users permission"
+  }
+]
+```
+
+### 2. Lấy Permission theo ID
+**GET** `/api/permissions/{id}`
+- **Authorization**: Cần JWT Token với role "Admin"
+- **Response**: `200 OK` hoặc `404 Not Found`
+```json
+{
+  "permissionId": 1,
+  "permissionName": "files.view",
+  "description": "View files permission"
+}
+```
+
+### 3. Tạo Permission mới
+**POST** `/api/permissions`
+- **Authorization**: Cần JWT Token với role "Admin"
+- **Request Body**:
+```json
+{
+  "permissionName": "roles.manage",
+  "description": "Manage roles permission"
+}
+```
+- **Response**: `201 Created`
+```json
+{
+  "permissionId": 4,
+  "permissionName": "roles.manage",
+  "description": "Manage roles permission"
+}
+```
+
+### 4. Cập nhật Permission
+**PUT** `/api/permissions/{id}`
+- **Authorization**: Cần JWT Token với role "Admin"
+- **Request Body**:
+```json
+{
+  "permissionName": "updated.permission",
+  "description": "Updated description"
+}
+```
+- **Response**: `200 OK`
+```json
+{
+  "permissionId": 4,
+  "permissionName": "updated.permission",
+  "description": "Updated description"
+}
+```
+
+### 5. Xóa Permission
+**DELETE** `/api/permissions/{id}`
+- **Authorization**: Cần JWT Token với role "Admin"
+- **Response**: `204 No Content` hoặc `400 Bad Request` (nếu permission đang được sử dụng bởi roles)
+- **Error Response** (400):
+```json
+{
+  "error": "Cannot delete permission that is assigned to roles"
+}
+```
+
+---
+
 ## 📋 DTOs (Data Transfer Objects)
 
 ### UserDto
@@ -446,6 +666,64 @@
   "name": "string",
   "email": "string",
   "roles": ["string"]
+}
+```
+
+### RoleDto
+```json
+{
+  "roleId": 1,
+  "roleName": "string",
+  "description": "string | null",
+  "permissions": ["string"]
+}
+```
+
+### CreateRoleDto
+```json
+{
+  "roleName": "string",
+  "description": "string | null"
+}
+```
+
+### UpdateRoleDto
+```json
+{
+  "roleName": "string | null",
+  "description": "string | null"
+}
+```
+
+### AssignPermissionsDto
+```json
+{
+  "permissionIds": [1, 2, 3]
+}
+```
+
+### PermissionDto
+```json
+{
+  "permissionId": 1,
+  "permissionName": "string",
+  "description": "string | null"
+}
+```
+
+### CreatePermissionDto
+```json
+{
+  "permissionName": "string",
+  "description": "string | null"
+}
+```
+
+### UpdatePermissionDto
+```json
+{
+  "permissionName": "string | null",
+  "description": "string | null"
 }
 ```
 

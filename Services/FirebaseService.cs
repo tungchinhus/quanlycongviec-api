@@ -11,6 +11,7 @@ public interface IFirebaseService
     Task<UserRecord?> GetUserAsync(string uid);
     Task DeleteUserAsync(string uid);
     Task<FirebaseToken> VerifyIdTokenAsync(string idToken);
+    Task<List<UserRecord>> ListAllUsersAsync(int maxResults = 1000);
 }
 
 public class FirebaseService : IFirebaseService
@@ -27,32 +28,91 @@ public class FirebaseService : IFirebaseService
 
     private void InitializeFirebase()
     {
-        if (FirebaseApp.DefaultInstance == null)
+        // Kiểm tra đã khởi tạo chưa
+        if (FirebaseApp.DefaultInstance != null)
+        {
+            _logger.LogInformation("FirebaseApp already initialized");
+            return;
+        }
+
+        try
         {
             var firebaseConfig = _configuration.GetSection("Firebase");
             var credentialsPath = firebaseConfig["CredentialsPath"];
             var credentialsJson = firebaseConfig["CredentialsJson"];
 
-            if (!string.IsNullOrEmpty(credentialsPath) && File.Exists(credentialsPath))
+            // Option 1: Sử dụng credentialsPath từ config
+            if (!string.IsNullOrEmpty(credentialsPath))
             {
-                FirebaseApp.Create(new AppOptions
+                // Nếu là relative path, tìm trong project directory
+                if (!Path.IsPathRooted(credentialsPath))
                 {
-                    Credential = GoogleCredential.FromFile(credentialsPath)
-                });
-                _logger.LogInformation("Firebase initialized with credentials file");
+                    var projectDir = Directory.GetCurrentDirectory();
+                    var fullPath = Path.Combine(projectDir, credentialsPath);
+                    
+                    if (File.Exists(fullPath))
+                    {
+                        credentialsPath = fullPath;
+                    }
+                    else if (File.Exists(credentialsPath))
+                    {
+                        // Giữ nguyên relative path nếu file tồn tại
+                    }
+                    else
+                    {
+                        // Fallback: thử tìm trong project root
+                        credentialsPath = Path.Combine(projectDir, "service-account-key.json");
+                    }
+                }
+
+                if (File.Exists(credentialsPath))
+                {
+                    FirebaseApp.Create(new AppOptions
+                    {
+                        Credential = GoogleCredential.FromFile(credentialsPath)
+                    });
+                    _logger.LogInformation("✅ Firebase initialized with credentials file: {Path}", credentialsPath);
+                    return;
+                }
+                else
+                {
+                    _logger.LogWarning("Credentials file not found at path: {Path}", credentialsPath);
+                }
             }
-            else if (!string.IsNullOrEmpty(credentialsJson))
+
+            // Option 2: Sử dụng credentialsJson từ config
+            if (!string.IsNullOrEmpty(credentialsJson))
             {
                 FirebaseApp.Create(new AppOptions
                 {
                     Credential = GoogleCredential.FromJson(credentialsJson)
                 });
-                _logger.LogInformation("Firebase initialized with credentials JSON");
+                _logger.LogInformation("✅ Firebase initialized with credentials JSON");
+                return;
             }
-            else
+
+            // Option 3: Fallback - tìm service-account-key.json trong project root
+            var defaultPath = Path.Combine(Directory.GetCurrentDirectory(), "service-account-key.json");
+            if (File.Exists(defaultPath))
             {
-                _logger.LogWarning("Firebase credentials not found. Firebase operations will fail.");
+                FirebaseApp.Create(new AppOptions
+                {
+                    Credential = GoogleCredential.FromFile(defaultPath)
+                });
+                _logger.LogInformation("✅ Firebase initialized with default credentials file: {Path}", defaultPath);
+                return;
             }
+
+            // Nếu không tìm thấy credentials
+            _logger.LogError("❌ Firebase credentials not found. Tried paths: {Path1}, {Path2}", 
+                credentialsPath ?? "null", defaultPath);
+            throw new FileNotFoundException(
+                $"Firebase credentials not found. Please ensure 'service-account-key.json' exists in the project root or configure Firebase:CredentialsPath in appsettings.json");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Error initializing Firebase: {Message}", ex.Message);
+            throw;
         }
     }
 
@@ -130,6 +190,32 @@ public class FirebaseService : IFirebaseService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error verifying Firebase ID token");
+            throw;
+        }
+    }
+
+    public async Task<List<UserRecord>> ListAllUsersAsync(int maxResults = 1000)
+    {
+        try
+        {
+            var users = new List<UserRecord>();
+            var pagedEnumerable = FirebaseAuth.DefaultInstance.ListUsersAsync(new ListUsersOptions());
+
+            await foreach (var user in pagedEnumerable)
+            {
+                users.Add(user);
+                if (users.Count >= maxResults)
+                {
+                    break;
+                }
+            }
+
+            _logger.LogInformation("Listed {Count} Firebase users", users.Count);
+            return users;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error listing Firebase users");
             throw;
         }
     }

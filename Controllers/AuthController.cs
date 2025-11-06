@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using System.Linq;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.Services;
@@ -19,12 +20,14 @@ namespace quanlyfilesBE.Controllers;
         private readonly ApplicationDbContext _db;
         private readonly IConfiguration _config;
         private readonly IFirebaseService _firebaseService;
+        private readonly ILogger<AuthController>? _logger;
 
-        public AuthController(ApplicationDbContext db, IConfiguration config, IFirebaseService firebaseService)
+        public AuthController(ApplicationDbContext db, IConfiguration config, IFirebaseService firebaseService, ILogger<AuthController>? logger = null)
         {
             _db = db;
             _config = config;
             _firebaseService = firebaseService;
+            _logger = logger;
         }
 
     public class RegisterRequest
@@ -79,15 +82,18 @@ namespace quanlyfilesBE.Controllers;
     [AllowAnonymous]
     public async Task<IActionResult> Login([FromBody] LoginRequest req)
     {
+        // Cho phép đăng nhập bằng userName hoặc email
         var user = await _db.Users
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
             .ThenInclude(r => r.RolePermissions)
             .ThenInclude(rp => rp.Permission)
-            .FirstOrDefaultAsync(u => u.UserName == req.UserName);
+            .FirstOrDefaultAsync(u => 
+                u.UserName == req.UserName || 
+                u.Email == req.UserName);
 
         if (user == null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
-            return Unauthorized();
+            return Unauthorized("Invalid username/email or password");
 
         if (!user.IsActive)
             return Unauthorized("User account is inactive");
@@ -100,7 +106,16 @@ namespace quanlyfilesBE.Controllers;
             .ToList();
 
         var token = GenerateJwt(user, roleNames, permissions);
-        return Ok(new { token, user = new { user.UserId, user.UserName, user.FullName, user.Email } });
+        return Ok(new { 
+            token, 
+            user = new { 
+                user.UserId, 
+                user.UserName, 
+                user.FullName, 
+                user.Email,
+                roles = roleNames
+            } 
+        });
     }
 
     [HttpPost("login/firebase")]
@@ -146,54 +161,75 @@ namespace quanlyfilesBE.Controllers;
             _db.Users.Add(user);
             await _db.SaveChangesAsync();
 
-            // Gán role mặc định "User" nếu có
-            var defaultRole = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == "User");
-            if (defaultRole != null)
-            {
-                _db.UserRoles.Add(new UserRole
+                // Gán role mặc định User nếu có
+                var defaultRole = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == RoleType.User.ToStringName());
+                if (defaultRole != null)
                 {
-                    UserId = user.UserId,
-                    RoleId = defaultRole.RoleId,
-                    AssignedAt = DateTime.UtcNow
-                });
-                await _db.SaveChangesAsync();
+                    _db.UserRoles.Add(new UserRole
+                    {
+                        UserId = user.UserId,
+                        RoleId = defaultRole.RoleId,
+                        AssignedAt = DateTime.UtcNow
+                    });
+                    await _db.SaveChangesAsync();
+                }
 
-                // Reload user với roles
+                // Reload user với roles để đảm bảo load đầy đủ dữ liệu
+                var newUserId = user.UserId;
+                _db.Entry(user).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+                
                 user = await _db.Users
                     .Include(u => u.UserRoles)
                     .ThenInclude(ur => ur.Role)
                     .ThenInclude(r => r.RolePermissions)
                     .ThenInclude(rp => rp.Permission)
-                    .FirstOrDefaultAsync(u => u.UserId == user.UserId);
+                    .FirstOrDefaultAsync(u => u.UserId == newUserId);
+        }
+        else
+        {
+            // Cập nhật thông tin nếu có thay đổi
+            bool hasChanges = false;
+            if (!string.IsNullOrEmpty(req.Email) && user.Email != req.Email)
+            {
+                user.Email = req.Email;
+                hasChanges = true;
             }
+            if (!string.IsNullOrEmpty(req.FullName) && user.FullName != req.FullName)
+            {
+                user.FullName = req.FullName;
+                hasChanges = true;
+            }
+            if (hasChanges)
+            {
+                await _db.SaveChangesAsync();
+            }
+
+            // Reload user với roles để đảm bảo load đầy đủ dữ liệu
+            var userId = user.UserId;
+            _db.Entry(user).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+            
+            user = await _db.Users
+                .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+                .ThenInclude(r => r.RolePermissions)
+                .ThenInclude(rp => rp.Permission)
+                .FirstOrDefaultAsync(u => u.UserId == userId);
         }
 
         if (user == null || !user.IsActive)
             return Unauthorized("User account is inactive");
 
-        // Cập nhật thông tin nếu có thay đổi
-        bool hasChanges = false;
-        if (!string.IsNullOrEmpty(req.Email) && user.Email != req.Email)
-        {
-            user.Email = req.Email;
-            hasChanges = true;
-        }
-        if (!string.IsNullOrEmpty(req.FullName) && user.FullName != req.FullName)
-        {
-            user.FullName = req.FullName;
-            hasChanges = true;
-        }
-        if (hasChanges)
-        {
-            await _db.SaveChangesAsync();
-        }
-
-        var roleNames = user.UserRoles.Select(ur => ur.Role.RoleName).Distinct().ToList();
-        var permissions = user.UserRoles
-            .SelectMany(ur => ur.Role.RolePermissions)
-            .Select(rp => rp.Permission.PermissionName)
+        var roleNames = user.UserRoles?.Select(ur => ur.Role?.RoleName)
+            .Where(rn => !string.IsNullOrEmpty(rn))
             .Distinct()
-            .ToList();
+            .ToList() ?? new List<string>();
+        
+        var permissions = user.UserRoles?
+            .SelectMany(ur => ur.Role?.RolePermissions ?? Enumerable.Empty<RolePermission>())
+            .Select(rp => rp.Permission?.PermissionName)
+            .Where(pn => !string.IsNullOrEmpty(pn))
+            .Distinct()
+            .ToList() ?? new List<string>();
 
         var token = GenerateJwt(user, roleNames, permissions);
         return Ok(new { 
@@ -211,16 +247,23 @@ namespace quanlyfilesBE.Controllers;
 
     [HttpPost("login/firebase-token")]
     [AllowAnonymous]
-    public async Task<IActionResult> LoginWithFirebaseToken([FromBody] FirebaseTokenLoginRequest req)
+    public async Task<IActionResult> LoginWithFirebaseToken([FromBody] FirebaseTokenLoginRequest? req)
     {
-        if (string.IsNullOrEmpty(req.IdToken))
-            return BadRequest("IdToken is required");
-
         try
         {
+            _logger?.LogInformation("LoginWithFirebaseToken called");
+            
+            if (req == null || string.IsNullOrEmpty(req.IdToken))
+            {
+                _logger?.LogWarning("LoginWithFirebaseToken: IdToken is required");
+                return BadRequest("IdToken is required");
+            }
+            
             // 1. Verify Firebase ID Token
+            _logger?.LogInformation("Verifying Firebase ID token...");
             var decodedToken = await _firebaseService.VerifyIdTokenAsync(req.IdToken);
             var firebaseUid = decodedToken.Uid;
+            _logger?.LogInformation("Firebase token verified - UID: {FirebaseUID}", firebaseUid);
 
             // 2. Get user info from Firebase token claims
             var email = decodedToken.Claims.TryGetValue("email", out var emailClaim) ? emailClaim?.ToString() : null;
@@ -229,6 +272,7 @@ namespace quanlyfilesBE.Controllers;
                 && emailVerifiedClaim?.ToString() == "True";
 
             // 3. Get or create user in local DB
+            _logger?.LogInformation("Looking up user in local DB - FirebaseUID: {FirebaseUID}", firebaseUid);
             var user = await _db.Users
                 .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
@@ -239,6 +283,7 @@ namespace quanlyfilesBE.Controllers;
             // Nếu user chưa tồn tại, tạo mới user
             if (user == null)
             {
+                _logger?.LogInformation("User not found in local DB, creating new user - FirebaseUID: {FirebaseUID}", firebaseUid);
                 // Tạo username từ email hoặc FirebaseUID
                 var userName = email?.Split('@')[0] ?? $"user_{firebaseUid.Substring(0, Math.Min(8, firebaseUid.Length))}";
 
@@ -264,9 +309,11 @@ namespace quanlyfilesBE.Controllers;
 
                 _db.Users.Add(user);
                 await _db.SaveChangesAsync();
+                _logger?.LogInformation("Created new user - UserId: {UserId}, UserName: {UserName}, Email: {Email}", 
+                    user.UserId, user.UserName, user.Email);
 
-                // Gán role mặc định "User" nếu có
-                var defaultRole = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == "User");
+                // Gán role mặc định User nếu có
+                var defaultRole = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == RoleType.User.ToStringName());
                 if (defaultRole != null)
                 {
                     _db.UserRoles.Add(new UserRole
@@ -276,15 +323,23 @@ namespace quanlyfilesBE.Controllers;
                         AssignedAt = DateTime.UtcNow
                     });
                     await _db.SaveChangesAsync();
-
-                    // Reload user với roles
-                    user = await _db.Users
-                        .Include(u => u.UserRoles)
-                        .ThenInclude(ur => ur.Role)
-                        .ThenInclude(r => r.RolePermissions)
-                        .ThenInclude(rp => rp.Permission)
-                        .FirstOrDefaultAsync(u => u.UserId == user.UserId);
+                    _logger?.LogInformation("Assigned default role 'User' to new user - UserId: {UserId}", user.UserId);
                 }
+                else
+                {
+                    _logger?.LogWarning("Default role 'User' not found in database");
+                }
+
+                // Reload user với roles để đảm bảo load đầy đủ dữ liệu
+                var newUserId = user.UserId;
+                _db.Entry(user).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+                
+                user = await _db.Users
+                    .Include(u => u.UserRoles)
+                    .ThenInclude(ur => ur.Role)
+                    .ThenInclude(r => r.RolePermissions)
+                    .ThenInclude(rp => rp.Permission)
+                    .FirstOrDefaultAsync(u => u.UserId == newUserId);
             }
             else
             {
@@ -304,42 +359,102 @@ namespace quanlyfilesBE.Controllers;
                 {
                     await _db.SaveChangesAsync();
                 }
+            }
 
-                // Reload user với roles
+            // Reload user với roles để đảm bảo load đầy đủ dữ liệu
+            // Detach user hiện tại để tránh tracking issues và đảm bảo load fresh data
+            var userId = user.UserId;
+            _db.Entry(user).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+            
+            user = await _db.Users
+                .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+                .ThenInclude(r => r.RolePermissions)
+                .ThenInclude(rp => rp.Permission)
+                .FirstOrDefaultAsync(u => u.UserId == userId);
+
+            if (user == null || !user.IsActive)
+                return Unauthorized("User account is inactive");
+
+            // 4. Get roles và permissions từ Local DB
+            var roleNames = user.UserRoles?.Select(ur => ur.Role?.RoleName)
+                .Where(rn => !string.IsNullOrEmpty(rn))
+                .Distinct()
+                .ToList() ?? new List<string>();
+            
+            var permissions = user.UserRoles?
+                .SelectMany(ur => ur.Role?.RolePermissions ?? Enumerable.Empty<RolePermission>())
+                .Select(rp => rp.Permission?.PermissionName)
+                .Where(pn => !string.IsNullOrEmpty(pn))
+                .Distinct()
+                .ToList() ?? new List<string>();
+
+            // 5. Get custom claims from Firebase và sync nếu Local DB không có roles
+            var firebaseUser = await _firebaseService.GetUserAsync(firebaseUid);
+            var firebaseRoleNames = new List<string>();
+            
+            if (firebaseUser?.CustomClaims != null && firebaseUser.CustomClaims.ContainsKey("roles"))
+            {
+                var firebaseRoles = firebaseUser.CustomClaims["roles"];
+                if (firebaseRoles is System.Collections.IEnumerable rolesEnumerable && firebaseRoles != null)
+                {
+                    firebaseRoleNames = rolesEnumerable
+                        .Cast<object>()
+                        .Select(r => r?.ToString())
+                        .Where(r => !string.IsNullOrEmpty(r))
+                        .Select(r => r!)
+                        .Distinct()
+                        .ToList();
+                }
+            }
+
+            // 6. Nếu Local DB không có roles nhưng Firebase có, sync từ Firebase xuống Local DB
+            if (!roleNames.Any() && firebaseRoleNames.Any())
+            {
+                // Xóa tất cả roles hiện tại (nếu có)
+                var existingUserRoles = _db.UserRoles.Where(ur => ur.UserId == user.UserId);
+                _db.UserRoles.RemoveRange(existingUserRoles);
+
+                // Thêm roles từ Firebase
+                var roles = await _db.Roles.Where(r => firebaseRoleNames.Contains(r.RoleName)).ToListAsync();
+                foreach (var role in roles)
+                {
+                    _db.UserRoles.Add(new UserRole
+                    {
+                        UserId = user.UserId,
+                        RoleId = role.RoleId,
+                        AssignedAt = DateTime.UtcNow
+                    });
+                }
+                await _db.SaveChangesAsync();
+
+                // Reload user với roles mới
+                _db.Entry(user).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
                 user = await _db.Users
                     .Include(u => u.UserRoles)
                     .ThenInclude(ur => ur.Role)
                     .ThenInclude(r => r.RolePermissions)
                     .ThenInclude(rp => rp.Permission)
                     .FirstOrDefaultAsync(u => u.UserId == user.UserId);
+
+                // Cập nhật roleNames và permissions từ user mới
+                roleNames = user?.UserRoles?.Select(ur => ur.Role?.RoleName)
+                    .Where(rn => !string.IsNullOrEmpty(rn))
+                    .Distinct()
+                    .ToList() ?? new List<string>();
+                
+                permissions = user?.UserRoles?
+                    .SelectMany(ur => ur.Role?.RolePermissions ?? Enumerable.Empty<RolePermission>())
+                    .Select(rp => rp.Permission?.PermissionName)
+                    .Where(pn => !string.IsNullOrEmpty(pn))
+                    .Distinct()
+                    .ToList() ?? new List<string>();
             }
+            // Nếu cả 2 đều có roles, ưu tiên Local DB (vì Local DB là source of truth)
+            // Nếu Local DB không có nhưng Firebase cũng không có, giữ nguyên (mảng rỗng)
 
-            if (user == null || !user.IsActive)
-                return Unauthorized("User account is inactive");
-
-            // 4. Get roles và permissions
-            var roleNames = user.UserRoles.Select(ur => ur.Role.RoleName).Distinct().ToList();
-            var permissions = user.UserRoles
-                .SelectMany(ur => ur.Role.RolePermissions)
-                .Select(rp => rp.Permission.PermissionName)
-                .Distinct()
-                .ToList();
-
-            // 5. Get custom claims from Firebase (if any)
-            var firebaseUser = await _firebaseService.GetUserAsync(firebaseUid);
-            if (firebaseUser?.CustomClaims != null && firebaseUser.CustomClaims.ContainsKey("roles"))
-            {
-                var firebaseRoles = firebaseUser.CustomClaims["roles"];
-                if (firebaseRoles is System.Collections.IEnumerable rolesEnumerable)
-                {
-                    var firebaseRoleNames = rolesEnumerable.Cast<object>().Select(r => r.ToString()!).Where(r => !string.IsNullOrEmpty(r)).ToList();
-                    // Sync roles from Firebase custom claims to DB if needed
-                    // (Có thể thêm logic sync ở đây nếu cần)
-                }
-            }
-
-            // 6. Generate JWT token
-            var token = GenerateJwt(user, roleNames, permissions);
+            // 7. Generate JWT token
+            var token = GenerateJwt(user!, roleNames, permissions);
             return Ok(new
             {
                 token,
@@ -357,7 +472,17 @@ namespace quanlyfilesBE.Controllers;
         }
         catch (Exception ex)
         {
-            return Unauthorized($"Invalid Firebase ID token: {ex.Message}");
+            // Log chi tiết lỗi để debug
+            _logger?.LogError(ex, "Error in LoginWithFirebaseToken: {Message}, StackTrace: {StackTrace}", 
+                ex.Message, ex.StackTrace);
+            
+            // Return 500 với thông tin chi tiết hơn để debug
+            return StatusCode(500, new { 
+                error = "Error during Firebase token login", 
+                message = ex.Message,
+                innerException = ex.InnerException?.Message,
+                stackTrace = ex.StackTrace
+            });
         }
     }
 

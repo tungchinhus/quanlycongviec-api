@@ -37,10 +37,13 @@ https://localhost:5001/api
 - **Request Body**:
 ```json
 {
-  "userName": "john_doe",
+  "userName": "john_doe",  // Có thể là username hoặc email
   "password": "password123"
 }
 ```
+- **Lưu ý**: Trường `userName` có thể nhận:
+  - Username (ví dụ: `"john_doe"`, `"admin"`)
+  - Email (ví dụ: `"john@example.com"`, `"admin@example.com"`)
 - **Response**: `200 OK`
 ```json
 {
@@ -49,7 +52,8 @@ https://localhost:5001/api
     "userId": 1,
     "userName": "john_doe",
     "fullName": "John Doe",
-    "email": "john@example.com"
+    "email": "john@example.com",
+    "roles": ["User"]
   }
 }
 ```

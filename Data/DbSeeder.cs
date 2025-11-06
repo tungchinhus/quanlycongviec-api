@@ -11,24 +11,33 @@ public static class DbSeeder
 
         if (!await db.Roles.AnyAsync())
         {
-            var adminRole = new Role { RoleName = "Admin", Description = "System administrator" };
-            var userRole = new Role { RoleName = "User", Description = "Standard user" };
-            db.Roles.AddRange(adminRole, userRole);
+            // Sử dụng enum để đảm bảo đồng nhất
+            var roles = new[]
+            {
+                new Role { RoleName = RoleType.Administrator.ToStringName(), Description = "System administrator" },
+                new Role { RoleName = RoleType.Manager.ToStringName(), Description = "Manager role" },
+                new Role { RoleName = RoleType.User.ToStringName(), Description = "Standard user" },
+                new Role { RoleName = RoleType.Guest.ToStringName(), Description = "Guest user" }
+            };
+            db.Roles.AddRange(roles);
             await db.SaveChangesAsync();
         }
 
         if (!await db.Permissions.AnyAsync())
         {
-            db.Permissions.AddRange(
-                new Permission { PermissionName = "files.view", Description = "View files" },
-                new Permission { PermissionName = "files.manage", Description = "Manage files" },
-                new Permission { PermissionName = "users.manage", Description = "Manage users" }
-            );
+            // Sử dụng enum để đảm bảo đồng nhất
+            var permissions = new[]
+            {
+                new Permission { PermissionName = PermissionType.FilesView.ToStringName(), Description = "View files" },
+                new Permission { PermissionName = PermissionType.FilesManage.ToStringName(), Description = "Manage files" },
+                new Permission { PermissionName = PermissionType.UsersManage.ToStringName(), Description = "Manage users" }
+            };
+            db.Permissions.AddRange(permissions);
             await db.SaveChangesAsync();
         }
 
-        // Ensure Admin role has broad permissions
-        var roleAdmin = await db.Roles.FirstAsync(r => r.RoleName == "Admin");
+        // Ensure Administrator role has broad permissions
+        var roleAdmin = await db.Roles.FirstAsync(r => r.RoleName == RoleType.Administrator.ToStringName());
         var allPerms = await db.Permissions.Select(p => p.PermissionId).ToListAsync();
         var existing = await db.RolePermissions.Where(rp => rp.RoleId == roleAdmin.RoleId).Select(rp => rp.PermissionId).ToListAsync();
         var missing = allPerms.Except(existing).ToList();
@@ -44,7 +53,7 @@ public static class DbSeeder
         // Seed default Admin user if none exists
         if (!await db.Users.AnyAsync())
         {
-            var adminRole = await db.Roles.FirstAsync(r => r.RoleName == "Admin");
+            var adminRole = await db.Roles.FirstAsync(r => r.RoleName == RoleType.Administrator.ToStringName());
 
             var adminUser = new User
             {

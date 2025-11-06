@@ -20,7 +20,7 @@ https://localhost:5001/api/auth
 
 ---
 
-## 🔐 1. Đăng Nhập với Username/Password
+## 🔐 1. Đăng Nhập với Username/Email và Password
 
 ### Endpoint
 ```
@@ -45,10 +45,22 @@ Content-Type: application/json
 }
 ```
 
-**Ví dụ:**
+**Lưu ý:** Trường `userName` có thể là:
+- **Username** (ví dụ: `"admin"`, `"user123"`)
+- **Email** (ví dụ: `"admin@example.com"`, `"user123@gmail.com"`)
+
+**Ví dụ 1: Đăng nhập bằng Username**
 ```json
 {
   "userName": "admin",
+  "password": "password123"
+}
+```
+
+**Ví dụ 2: Đăng nhập bằng Email**
+```json
+{
+  "userName": "admin@example.com",
   "password": "password123"
 }
 ```
@@ -62,19 +74,23 @@ Content-Type: application/json
     "userId": 1,
     "userName": "admin",
     "fullName": "Admin User",
-    "email": "admin@example.com"
+    "email": "admin@example.com",
+    "roles": ["Admin"]
   }
 }
 ```
 
+**Lưu ý:** Response bây giờ bao gồm `roles` trong user object.
+
 ### Response Error
 
-#### 401 Unauthorized - Sai username hoặc password
+#### 401 Unauthorized - Sai username/email hoặc password
 ```json
 {
   "type": "https://tools.ietf.org/html/rfc7235#section-3.1",
   "title": "Unauthorized",
-  "status": 401
+  "status": 401,
+  "detail": "Invalid username/email or password"
 }
 ```
 
@@ -89,6 +105,8 @@ Content-Type: application/json
 ```
 
 ### cURL Example
+
+**Đăng nhập bằng Username:**
 ```bash
 curl -X POST "http://localhost:5000/api/auth/login" \
   -H "Content-Type: application/json" \
@@ -98,15 +116,30 @@ curl -X POST "http://localhost:5000/api/auth/login" \
   }'
 ```
 
+**Đăng nhập bằng Email:**
+```bash
+curl -X POST "http://localhost:5000/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userName": "admin@example.com",
+    "password": "password123"
+  }'
+```
+
 ### JavaScript Example
+
+**Đăng nhập bằng Username hoặc Email:**
 ```javascript
+// Có thể dùng username hoặc email trong trường userName
+const loginIdentifier = 'admin'; // hoặc 'admin@example.com'
+
 const response = await fetch('http://localhost:5000/api/auth/login', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json'
   },
   body: JSON.stringify({
-    userName: 'admin',
+    userName: loginIdentifier, // Có thể là username hoặc email
     password: 'password123'
   })
 });
@@ -116,8 +149,38 @@ if (response.ok) {
   // Lưu token
   localStorage.setItem('token', data.token);
   console.log('User:', data.user);
+  console.log('Roles:', data.user.roles);
 } else {
-  console.error('Login failed');
+  console.error('Login failed:', data);
+}
+```
+
+**Ví dụ với form:**
+```javascript
+async function handleLogin(event) {
+  event.preventDefault();
+  
+  const formData = new FormData(event.target);
+  const loginValue = formData.get('login'); // Có thể là username hoặc email
+  
+  const response = await fetch('http://localhost:5000/api/auth/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      userName: loginValue, // Tự động nhận diện là username hay email
+      password: formData.get('password')
+    })
+  });
+  
+  const data = await response.json();
+  if (response.ok) {
+    localStorage.setItem('token', data.token);
+    // Redirect hoặc update UI
+  } else {
+    alert('Đăng nhập thất bại: ' + (data.detail || 'Sai tên đăng nhập/email hoặc mật khẩu'));
+  }
 }
 ```
 
@@ -130,10 +193,14 @@ if (response.ok) {
 4. **Body** (raw JSON):
 ```json
 {
-  "userName": "admin",
+  "userName": "admin",  // Có thể là username hoặc email
   "password": "password123"
 }
 ```
+
+**Lưu ý:** Trường `userName` có thể nhận:
+- Username (ví dụ: `"admin"`, `"user123"`)
+- Email (ví dụ: `"admin@example.com"`, `"user123@gmail.com"`)
 
 5. **Tests Tab** (để tự động lưu token):
 ```javascript

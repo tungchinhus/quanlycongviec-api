@@ -36,15 +36,20 @@ public class UsersController : ControllerBase
 
             // Đảm bảo page và pageSize hợp lệ
             if (page < 1) page = 1;
-            if (pageSize < 1) pageSize = 10;
-            if (pageSize > 100) pageSize = 100; // Giới hạn tối đa
+            if (pageSize < 1) pageSize = 100; // Tăng mặc định để lấy nhiều users hơn
+            if (pageSize > 1000) pageSize = 1000; // Tăng giới hạn tối đa
 
-            var query = _db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role).AsQueryable();
+            // CHỈ LẤY TỪ DATABASE - KHÔNG LẤY TỪ FIREBASE HAY HARDCODE
+            var query = _db.Users
+                .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+                .AsQueryable();
 
             // Log tổng số users trước khi filter
             var totalUsersBeforeFilter = await _db.Users.CountAsync();
             _logger?.LogInformation("Total users in database (before filter): {Count}", totalUsersBeforeFilter);
 
+            // CHỈ ÁP DỤNG SEARCH FILTER NẾU CÓ - KHÔNG FILTER THEO ISACTIVE HAY BẤT KỲ ĐIỀU KIỆN NÀO KHÁC
             if (!string.IsNullOrEmpty(search))
             {
                 query = query.Where(u => 
@@ -53,6 +58,9 @@ public class UsersController : ControllerBase
                     u.Email != null && u.Email.Contains(search));
                 _logger?.LogInformation("Applied search filter: {Search}", search);
             }
+            
+            // KHÔNG FILTER THEO IsActive - LẤY TẤT CẢ USERS TỪ DB
+            // KHÔNG LẤY TỪ FIREBASE - CHỈ LẤY TỪ POSTGRESQL DATABASE
 
             var totalCount = await query.CountAsync();
             _logger?.LogInformation("Total users after filter: {Count}", totalCount);
@@ -74,7 +82,11 @@ public class UsersController : ControllerBase
                 FirebaseUID = u.FirebaseUID,
                 IsActive = u.IsActive,
                 CreatedAt = u.CreatedAt,
-                Roles = u.UserRoles.Select(ur => ur.Role.RoleName).ToList()
+                Roles = u.UserRoles?
+                    .Where(ur => ur.Role != null && !string.IsNullOrEmpty(ur.Role.RoleName))
+                    .Select(ur => ur.Role!.RoleName)
+                    .Distinct()
+                    .ToList() ?? new List<string>()
             }).ToList();
 
             var response = new
@@ -119,7 +131,11 @@ public class UsersController : ControllerBase
             FirebaseUID = user.FirebaseUID,
             IsActive = user.IsActive,
             CreatedAt = user.CreatedAt,
-            Roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList()
+            Roles = user.UserRoles?
+                .Where(ur => ur.Role != null && !string.IsNullOrEmpty(ur.Role.RoleName))
+                .Select(ur => ur.Role!.RoleName)
+                .Distinct()
+                .ToList() ?? new List<string>()
         };
 
         return Ok(userDto);
@@ -554,17 +570,10 @@ public class UsersController : ControllerBase
                 // Nếu không có roles array, dùng Role string
                 roleNames.Add(dto.Role);
             }
-            else
-            {
-                // Mặc định là User role nếu không có role
-                roleNames.Add(RoleType.User.ToStringName());
-            }
+            // KHÔNG CÓ FALLBACK HARDCODE - NẾU KHÔNG CÓ ROLE, ĐỂ TRỐNG
+            // Roles phải được chỉ định rõ ràng, không tự động gán mặc định
             
-            // Đảm bảo có ít nhất 1 role
-            if (!roleNames.Any())
-            {
-                roleNames.Add(RoleType.User.ToStringName());
-            }
+            // KHÔNG ĐẢM BẢO CÓ ÍT NHẤT 1 ROLE - USER CÓ THỂ KHÔNG CÓ ROLE
 
             // 3. Set custom claims với roles trên Firebase
             var claims = new Dictionary<string, object>
@@ -1279,7 +1288,11 @@ public class UsersController : ControllerBase
                 FirebaseUID = user.FirebaseUID,
                 IsActive = user.IsActive,
                 CreatedAt = user.CreatedAt,
-                Roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList()
+                Roles = user.UserRoles?
+                    .Where(ur => ur.Role != null && !string.IsNullOrEmpty(ur.Role.RoleName))
+                    .Select(ur => ur.Role!.RoleName)
+                    .Distinct()
+                    .ToList() ?? new List<string>()
             };
 
             _logger?.LogInformation("Successfully updated/created user - UserId: {UserId}, FirebaseUID: {FirebaseUID}", 
@@ -1379,11 +1392,9 @@ public class UsersController : ControllerBase
                 }
             }
 
-            // If still no roles, assign default User role
-            if (!rolesToAssign.Any())
-            {
-                rolesToAssign = new List<string> { RoleType.User.ToStringName() };
-            }
+            // KHÔNG GÁN ROLE MẶC ĐỊNH - CHỈ LẤY TỪ DATABASE HOẶC DTO
+            // Nếu không có roles, user sẽ không có role (để trống)
+            // Không có fallback hardcode
 
             if (rolesToAssign.Any())
             {
@@ -2283,12 +2294,14 @@ public class UsersController : ControllerBase
 
     // GET: api/users/all
     // Endpoint để lấy tất cả users không phân trang (để debug)
+    // CHỈ LẤY TỪ DATABASE POSTGRESQL - KHÔNG LẤY TỪ FIREBASE HAY HARDCODE
     [HttpGet("all")]
     [AllowAnonymous]
     public async Task<IActionResult> GetAllUsersNoPagination()
     {
         try
         {
+            // CHỈ LẤY TỪ DATABASE - KHÔNG CÓ FILTER NÀO
             var users = await _db.Users
                 .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
@@ -2304,7 +2317,11 @@ public class UsersController : ControllerBase
                 FirebaseUID = u.FirebaseUID,
                 IsActive = u.IsActive,
                 CreatedAt = u.CreatedAt,
-                Roles = u.UserRoles.Select(ur => ur.Role.RoleName).ToList()
+                Roles = u.UserRoles?
+                    .Where(ur => ur.Role != null && !string.IsNullOrEmpty(ur.Role.RoleName))
+                    .Select(ur => ur.Role!.RoleName)
+                    .Distinct()
+                    .ToList() ?? new List<string>()
             }).ToList();
 
             _logger?.LogInformation("GetAllUsersNoPagination: Returning {Count} users", userDtos.Count);

@@ -22,24 +22,127 @@ public class RolesController : ControllerBase
     }
 
     // GET: api/roles
+    // CHỈ LẤY TỪ DATABASE POSTGRESQL - KHÔNG LẤY TỪ FIREBASE HAY CACHE
     [HttpGet]
     public async Task<IActionResult> GetAllRoles()
     {
         try
         {
-            var roles = await _db.Roles
-                .Include(r => r.RolePermissions)
-                .ThenInclude(rp => rp.Permission)
-                .OrderBy(r => r.RoleName)
-                .ToListAsync();
+            // CHỈ LẤY TỪ DATABASE POSTGRESQL - DÙNG ADO.NET RAW SQL HOÀN TOÀN
+            // BYPASS ENTITY FRAMEWORK ĐỂ ĐẢM BẢO LẤY ĐÚNG DỮ LIỆU TỪ DB
+            _logger?.LogInformation("GetAllRoles called - Lấy roles từ PostgreSQL database bằng ADO.NET RAW SQL");
 
-            var roleDtos = roles.Select(r => new RoleDto
+            var roleDtos = new List<RoleDto>();
+            var connection = _db.Database.GetDbConnection();
+            var wasOpen = connection.State == System.Data.ConnectionState.Open;
+            
+            if (!wasOpen)
             {
-                RoleId = r.RoleId,
-                RoleName = r.RoleName,
-                Description = r.Description,
-                Permissions = r.RolePermissions.Select(rp => rp.Permission.PermissionName).ToList()
-            }).ToList();
+                await _db.Database.OpenConnectionAsync();
+            }
+            
+            try
+            {
+                // LẤY ROLES TRỰC TIẾP TỪ DATABASE BẰNG RAW SQL - KHÔNG QUA ENTITY FRAMEWORK
+                // SQL SERVER SYNTAX - DÙNG SQUARE BRACKETS
+                var roles = new List<(int RoleId, string RoleName, string? Description)>();
+                
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = @"SELECT [RoleId], [RoleName], [Description] FROM [Roles] ORDER BY [RoleId]";
+                    
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            var roleId = reader.GetInt32(0);
+                            var roleName = reader.GetString(1);
+                            var description = reader.IsDBNull(2) ? null : reader.GetString(2);
+                            
+                            roles.Add((roleId, roleName, description));
+                            
+                            _logger?.LogInformation("Role from DB (ADO.NET) - RoleId: {RoleId}, RoleName: {RoleName}, Description: {Description}", 
+                                roleId, roleName, description);
+                        }
+                    }
+                }
+                
+                _logger?.LogInformation("Retrieved {Count} roles from database using ADO.NET RAW SQL", roles.Count);
+                
+                // Lấy permissions cho tất cả roles bằng raw SQL
+                var rolePermissionsMap = new Dictionary<int, List<string>>();
+                var roleIds = roles.Select(r => r.RoleId).ToList();
+                
+                foreach (var roleId in roleIds)
+                {
+                    rolePermissionsMap[roleId] = new List<string>();
+                }
+                
+                if (roleIds.Any())
+                {
+                    using (var command = connection.CreateCommand())
+                    {
+                        // Lấy tất cả permissions cho tất cả roles trong một query
+                        // SQL SERVER SYNTAX - DÙNG SQUARE BRACKETS
+                        var roleIdsString = string.Join(",", roleIds);
+                        command.CommandText = $@"
+                            SELECT rp.[RoleId], p.[PermissionName] 
+                            FROM [RolePermissions] rp 
+                            INNER JOIN [Permissions] p ON rp.[PermissionId] = p.[PermissionId] 
+                            WHERE rp.[RoleId] IN ({roleIdsString})
+                            ORDER BY rp.[RoleId]";
+                        
+                        using (var reader = await command.ExecuteReaderAsync())
+                        {
+                            while (await reader.ReadAsync())
+                            {
+                                var rid = reader.GetInt32(0);
+                                if (!reader.IsDBNull(1))
+                                {
+                                    var permName = reader.GetString(1);
+                                    if (rolePermissionsMap.ContainsKey(rid))
+                                    {
+                                        rolePermissionsMap[rid].Add(permName);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Map roles sang DTOs với permissions - GIỮ NGUYÊN RoleId TỪ DB
+                foreach (var role in roles)
+                {
+                    roleDtos.Add(new RoleDto
+                    {
+                        RoleId = role.RoleId, // GIỮ NGUYÊN RoleId TỪ DB - KHÔNG TRANSFORM
+                        RoleName = role.RoleName, // GIỮ NGUYÊN RoleName TỪ DB
+                        Description = role.Description, // GIỮ NGUYÊN Description TỪ DB
+                        Permissions = rolePermissionsMap.GetValueOrDefault(role.RoleId, new List<string>())
+                    });
+                }
+            }
+            finally
+            {
+                if (!wasOpen && connection.State == System.Data.ConnectionState.Open)
+                {
+                    await _db.Database.CloseConnectionAsync();
+                }
+            }
+
+            _logger?.LogInformation("Returning {Count} roles to client", roleDtos.Count);
+            
+            // Log chi tiết từng role DTO để debug
+            foreach (var dto in roleDtos)
+            {
+                _logger?.LogInformation("Role DTO - RoleId: {RoleId}, RoleName: {RoleName}, Description: {Description}", 
+                    dto.RoleId, dto.RoleName, dto.Description);
+            }
+
+            // Disable caching - luôn lấy dữ liệu mới từ database
+            Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+            Response.Headers["Pragma"] = "no-cache";
+            Response.Headers["Expires"] = "0";
 
             return Ok(roleDtos);
         }

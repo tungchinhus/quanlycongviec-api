@@ -40,7 +40,7 @@ public static class RoleTypeExtensions
             RoleType.Manager => "Manager",
             RoleType.User => "User",
             RoleType.Guest => "Guest",
-            _ => "User" // Default
+            _ => throw new ArgumentOutOfRangeException(nameof(roleType), roleType, "Unknown role type - không có fallback hardcode")
         };
     }
 

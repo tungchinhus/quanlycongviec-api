@@ -7,80 +7,64 @@ public static class DbSeeder
 {
     public static async Task SeedAsync(ApplicationDbContext db)
     {
-        await db.Database.MigrateAsync();
-
-        if (!await db.Roles.AnyAsync())
+        // CHỈ CHẠY MIGRATION - KHÔNG HARDCODE BẤT KỲ DỮ LIỆU NÀO
+        // Tất cả roles, permissions, users phải được quản lý qua API hoặc database trực tiếp
+        // Không tự động seed để đảm bảo database là source of truth duy nhất
+        
+        try
         {
-            // Sử dụng enum để đảm bảo đồng nhất
-            var roles = new[]
+            // Kiểm tra xem database có tồn tại không
+            if (await db.Database.CanConnectAsync())
             {
-                new Role { RoleName = RoleType.Administrator.ToStringName(), Description = "System administrator" },
-                new Role { RoleName = RoleType.Manager.ToStringName(), Description = "Manager role" },
-                new Role { RoleName = RoleType.User.ToStringName(), Description = "Standard user" },
-                new Role { RoleName = RoleType.Guest.ToStringName(), Description = "Guest user" }
-            };
-            db.Roles.AddRange(roles);
-            await db.SaveChangesAsync();
-        }
-
-        if (!await db.Permissions.AnyAsync())
-        {
-            // Sử dụng enum để đảm bảo đồng nhất
-            var permissions = new[]
+                // Kiểm tra xem có pending migrations không
+                var pendingMigrations = await db.Database.GetPendingMigrationsAsync();
+                if (pendingMigrations.Any())
+                {
+                    Console.WriteLine($"Applying {pendingMigrations.Count()} pending migration(s)...");
+                    await db.Database.MigrateAsync();
+                    Console.WriteLine("Migrations applied successfully.");
+                }
+                else
+                {
+                    Console.WriteLine("Database is up to date. No pending migrations.");
+                }
+            }
+            else
             {
-                new Permission { PermissionName = PermissionType.FilesView.ToStringName(), Description = "View files" },
-                new Permission { PermissionName = PermissionType.FilesManage.ToStringName(), Description = "Manage files" },
-                new Permission { PermissionName = PermissionType.UsersManage.ToStringName(), Description = "Manage users" }
-            };
-            db.Permissions.AddRange(permissions);
-            await db.SaveChangesAsync();
+                // Database chưa tồn tại, tạo mới và apply migrations
+                Console.WriteLine("Database does not exist. Creating and applying migrations...");
+                await db.Database.MigrateAsync();
+                Console.WriteLine("Database created and migrations applied successfully.");
+            }
         }
-
-        // Ensure Administrator role has broad permissions
-        var roleAdmin = await db.Roles.FirstAsync(r => r.RoleName == RoleType.Administrator.ToStringName());
-        var allPerms = await db.Permissions.Select(p => p.PermissionId).ToListAsync();
-        var existing = await db.RolePermissions.Where(rp => rp.RoleId == roleAdmin.RoleId).Select(rp => rp.PermissionId).ToListAsync();
-        var missing = allPerms.Except(existing).ToList();
-        foreach (var pid in missing)
+        catch (Microsoft.Data.SqlClient.SqlException sqlEx)
         {
-            db.RolePermissions.Add(new RolePermission { RoleId = roleAdmin.RoleId, PermissionId = pid });
+            // Xử lý lỗi SQL - có thể do bảng đã tồn tại hoặc lỗi khác
+            Console.WriteLine($"Warning: Database migration encountered an issue: {sqlEx.Message}");
+            Console.WriteLine("Application will continue to run. Please check database manually if needed.");
+            // Không throw exception để app vẫn có thể chạy
         }
-        if (missing.Count > 0)
+        catch (Exception ex)
         {
-            await db.SaveChangesAsync();
+            // Xử lý các lỗi khác
+            Console.WriteLine($"Warning: An error occurred during database migration: {ex.Message}");
+            Console.WriteLine("Application will continue to run. Please check database manually if needed.");
+            // Không throw exception để app vẫn có thể chạy
         }
 
-        // Seed default Admin user if none exists
-        if (!await db.Users.AnyAsync())
-        {
-            var adminRole = await db.Roles.FirstAsync(r => r.RoleName == RoleType.Administrator.ToStringName());
-
-            var adminUser = new User
-            {
-                UserName = "admin",
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin@123"),
-                FullName = "System Administrator",
-                Email = "admin@example.com",
-                IsActive = true,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            db.Users.Add(adminUser);
-            await db.SaveChangesAsync();
-
-            db.UserRoles.Add(new UserRole
-            {
-                UserId = adminUser.UserId,
-                RoleId = adminRole.RoleId,
-                AssignedAt = DateTime.UtcNow
-            });
-
-            await db.SaveChangesAsync();
-        }
+        // KHÔNG TỰ ĐỘNG TẠO ROLES - LẤY TỪ DATABASE
+        // Roles phải được tạo thủ công qua API /api/roles hoặc database trực tiếp
+        
+        // KHÔNG TỰ ĐỘNG TẠO PERMISSIONS - LẤY TỪ DATABASE
+        // Permissions phải được tạo thủ công qua API hoặc database trực tiếp
+        
+        // KHÔNG TỰ ĐỘNG TẠO USERS - LẤY TỪ DATABASE
+        // Users phải được tạo thủ công qua API /api/users hoặc database trực tiếp
+        
+        // KHÔNG TỰ ĐỘNG GÁN PERMISSIONS CHO ROLES - LẤY TỪ DATABASE
+        // RolePermissions phải được quản lý qua API /api/roles/{id}/permissions
     }
 }
-
-
 
 
 

@@ -1,6 +1,13 @@
-@quanlyfilesBE_HostAddress = http://localhost:5104
+@quanlyfilesBE_HostAddress = http://localhost:5000
 
-GET {{quanlyfilesBE_HostAddress}}/weatherforecast/
+### Test Database Connection
+GET {{quanlyfilesBE_HostAddress}}/api/test-db
+Accept: application/json
+
+###
+
+### Root endpoint (redirects to Swagger in Development)
+GET {{quanlyfilesBE_HostAddress}}/
 Accept: application/json
 
 ###

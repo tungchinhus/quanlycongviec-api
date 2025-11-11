@@ -17,6 +17,13 @@ public class ApplicationDbContext : DbContext
     public DbSet<Permission> Permissions { get; set; }
     public DbSet<UserRole> UserRoles { get; set; }
     public DbSet<RolePermission> RolePermissions { get; set; }
+    public DbSet<Setting> Settings { get; set; }
+    public DbSet<TechnicalSheet> TechnicalSheets { get; set; }
+    public DbSet<MachineAssignment> MachineAssignments { get; set; }
+    public DbSet<AssignmentApproval> AssignmentApprovals { get; set; }
+    public DbSet<WorkChange> WorkChanges { get; set; }
+    public DbSet<WorkItem> WorkItems { get; set; }
+    public DbSet<TechnicalNotification> TechnicalNotifications { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -108,6 +115,127 @@ public class ApplicationDbContext : DbContext
                   .WithMany(p => p.RolePermissions)
                   .HasForeignKey(rp => rp.PermissionId)
                   .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Settings
+        modelBuilder.Entity<Setting>(entity =>
+        {
+            entity.ToTable("Settings");
+            entity.HasKey(e => e.SettingId);
+            entity.Property(e => e.Key).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Value).IsRequired().HasMaxLength(1000);
+            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.HasIndex(e => e.Key).IsUnique();
+        });
+
+        // TechnicalSheet
+        modelBuilder.Entity<TechnicalSheet>(entity =>
+        {
+            entity.ToTable("TechnicalSheet");
+            entity.HasKey(e => e.TBKT_ID);
+            entity.Property(e => e.TBKT_ID).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.VoltageSpec).HasMaxLength(100);
+            entity.Property(e => e.Phase).HasMaxLength(50);
+            entity.Property(e => e.StandardCode).HasMaxLength(100);
+            entity.Property(e => e.Proposer).HasMaxLength(100);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.HasIndex(e => e.TBKT_ID);
+        });
+
+        // MachineAssignment
+        modelBuilder.Entity<MachineAssignment>(entity =>
+        {
+            entity.ToTable("MachineAssignment");
+            entity.HasKey(e => e.AssignmentID);
+            entity.Property(e => e.TBKT_ID).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.MachineName).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.StandardRequirement).HasMaxLength(1000);
+            entity.Property(e => e.AdditionalRequest).HasMaxLength(1000);
+            entity.Property(e => e.Designer).HasMaxLength(100);
+            entity.Property(e => e.TeamLeader).HasMaxLength(100);
+            
+            entity.HasOne(e => e.TechnicalSheet)
+                  .WithMany(ts => ts.MachineAssignments)
+                  .HasForeignKey(e => e.TBKT_ID)
+                  .OnDelete(DeleteBehavior.Restrict);
+            
+            entity.HasIndex(e => e.TBKT_ID);
+            entity.HasIndex(e => e.MachineName);
+        });
+
+        // AssignmentApproval
+        modelBuilder.Entity<AssignmentApproval>(entity =>
+        {
+            entity.ToTable("AssignmentApproval");
+            entity.HasKey(e => e.ApprovalID);
+            entity.Property(e => e.ApproverRole).HasMaxLength(100);
+            entity.Property(e => e.ApproverName).HasMaxLength(100);
+            entity.Property(e => e.Notes).HasMaxLength(500);
+            
+            entity.HasOne(e => e.MachineAssignment)
+                  .WithMany(ma => ma.AssignmentApprovals)
+                  .HasForeignKey(e => e.AssignmentID)
+                  .OnDelete(DeleteBehavior.Cascade);
+            
+            entity.HasIndex(e => e.AssignmentID);
+        });
+
+        // WorkChange
+        modelBuilder.Entity<WorkChange>(entity =>
+        {
+            entity.ToTable("WorkChange");
+            entity.HasKey(e => e.ChangeID);
+            entity.Property(e => e.ChangeType).HasMaxLength(100);
+            entity.Property(e => e.Description).HasMaxLength(1000);
+            
+            entity.HasOne(e => e.MachineAssignment)
+                  .WithMany(ma => ma.WorkChanges)
+                  .HasForeignKey(e => e.AssignmentID)
+                  .OnDelete(DeleteBehavior.Cascade);
+            
+            entity.HasIndex(e => e.AssignmentID);
+        });
+
+        // WorkItem
+        modelBuilder.Entity<WorkItem>(entity =>
+        {
+            entity.ToTable("WorkItem");
+            entity.HasKey(e => e.WorkItemID);
+            entity.Property(e => e.WorkType).HasMaxLength(100);
+            entity.Property(e => e.PersonName).HasMaxLength(100);
+            entity.Property(e => e.Notes).HasMaxLength(500);
+            
+            entity.HasOne(e => e.MachineAssignment)
+                  .WithMany(ma => ma.WorkItems)
+                  .HasForeignKey(e => e.AssignmentID)
+                  .OnDelete(DeleteBehavior.Cascade);
+            
+            entity.HasIndex(e => e.AssignmentID);
+        });
+
+        // TechnicalNotification
+        modelBuilder.Entity<TechnicalNotification>(entity =>
+        {
+            entity.ToTable("TechnicalNotification");
+            entity.HasKey(e => e.NotificationID);
+            entity.Property(e => e.TBKT_ID).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.DesignReason).HasMaxLength(500);
+            entity.Property(e => e.TechnicalStatus).HasMaxLength(100);
+            entity.Property(e => e.RoutDrawingCode).HasMaxLength(100);
+            entity.Property(e => e.VoDrawingCode).HasMaxLength(100);
+            entity.Property(e => e.Accessories).HasMaxLength(500);
+            entity.Property(e => e.MaterialUsage).HasMaxLength(500);
+            entity.Property(e => e.TechnicalNotes).HasMaxLength(1000);
+            entity.Property(e => e.Signer_Proposal).HasMaxLength(100);
+            entity.Property(e => e.Signer_Designer).HasMaxLength(100);
+            entity.Property(e => e.Signer_Approver).HasMaxLength(100);
+            
+            entity.HasOne(e => e.TechnicalSheet)
+                  .WithMany(ts => ts.TechnicalNotifications)
+                  .HasForeignKey(e => e.TBKT_ID)
+                  .OnDelete(DeleteBehavior.Restrict);
+            
+            entity.HasIndex(e => e.TBKT_ID);
         });
 
         // Seed initial admin role and permission if table is empty at migration time handled separately

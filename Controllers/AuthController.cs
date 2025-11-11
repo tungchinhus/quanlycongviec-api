@@ -161,18 +161,9 @@ namespace quanlyfilesBE.Controllers;
             _db.Users.Add(user);
             await _db.SaveChangesAsync();
 
-                // Gán role mặc định User nếu có
-                var defaultRole = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == RoleType.User.ToStringName());
-                if (defaultRole != null)
-                {
-                    _db.UserRoles.Add(new UserRole
-                    {
-                        UserId = user.UserId,
-                        RoleId = defaultRole.RoleId,
-                        AssignedAt = DateTime.UtcNow
-                    });
-                    await _db.SaveChangesAsync();
-                }
+                // KHÔNG GÁN ROLE MẶC ĐỊNH - CHỈ LẤY TỪ DATABASE
+                // Roles phải được gán thủ công qua API hoặc từ Firebase custom claims
+                // Không có fallback hardcode
 
                 // Reload user với roles để đảm bảo load đầy đủ dữ liệu
                 var newUserId = user.UserId;
@@ -221,6 +212,7 @@ namespace quanlyfilesBE.Controllers;
 
         var roleNames = user.UserRoles?.Select(ur => ur.Role?.RoleName)
             .Where(rn => !string.IsNullOrEmpty(rn))
+            .Select(r => r!)
             .Distinct()
             .ToList() ?? new List<string>();
         
@@ -228,6 +220,7 @@ namespace quanlyfilesBE.Controllers;
             .SelectMany(ur => ur.Role?.RolePermissions ?? Enumerable.Empty<RolePermission>())
             .Select(rp => rp.Permission?.PermissionName)
             .Where(pn => !string.IsNullOrEmpty(pn))
+            .Select(p => p!)
             .Distinct()
             .ToList() ?? new List<string>();
 
@@ -312,23 +305,9 @@ namespace quanlyfilesBE.Controllers;
                 _logger?.LogInformation("Created new user - UserId: {UserId}, UserName: {UserName}, Email: {Email}", 
                     user.UserId, user.UserName, user.Email);
 
-                // Gán role mặc định User nếu có
-                var defaultRole = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == RoleType.User.ToStringName());
-                if (defaultRole != null)
-                {
-                    _db.UserRoles.Add(new UserRole
-                    {
-                        UserId = user.UserId,
-                        RoleId = defaultRole.RoleId,
-                        AssignedAt = DateTime.UtcNow
-                    });
-                    await _db.SaveChangesAsync();
-                    _logger?.LogInformation("Assigned default role 'User' to new user - UserId: {UserId}", user.UserId);
-                }
-                else
-                {
-                    _logger?.LogWarning("Default role 'User' not found in database");
-                }
+                // KHÔNG GÁN ROLE MẶC ĐỊNH - CHỈ LẤY TỪ DATABASE
+                // Roles phải được gán thủ công qua API hoặc từ Firebase custom claims
+                // Không có fallback hardcode
 
                 // Reload user với roles để đảm bảo load đầy đủ dữ liệu
                 var newUserId = user.UserId;
@@ -363,7 +342,7 @@ namespace quanlyfilesBE.Controllers;
 
             // Reload user với roles để đảm bảo load đầy đủ dữ liệu
             // Detach user hiện tại để tránh tracking issues và đảm bảo load fresh data
-            var userId = user.UserId;
+            var userId = user!.UserId;
             _db.Entry(user).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
             
             user = await _db.Users
@@ -379,6 +358,7 @@ namespace quanlyfilesBE.Controllers;
             // 4. Get roles và permissions từ Local DB
             var roleNames = user.UserRoles?.Select(ur => ur.Role?.RoleName)
                 .Where(rn => !string.IsNullOrEmpty(rn))
+                .Select(r => r!)
                 .Distinct()
                 .ToList() ?? new List<string>();
             
@@ -386,6 +366,7 @@ namespace quanlyfilesBE.Controllers;
                 .SelectMany(ur => ur.Role?.RolePermissions ?? Enumerable.Empty<RolePermission>())
                 .Select(rp => rp.Permission?.PermissionName)
                 .Where(pn => !string.IsNullOrEmpty(pn))
+                .Select(p => p!)
                 .Distinct()
                 .ToList() ?? new List<string>();
 
@@ -440,6 +421,7 @@ namespace quanlyfilesBE.Controllers;
                 // Cập nhật roleNames và permissions từ user mới
                 roleNames = user?.UserRoles?.Select(ur => ur.Role?.RoleName)
                     .Where(rn => !string.IsNullOrEmpty(rn))
+                    .Select(r => r!)
                     .Distinct()
                     .ToList() ?? new List<string>();
                 
@@ -447,6 +429,7 @@ namespace quanlyfilesBE.Controllers;
                     .SelectMany(ur => ur.Role?.RolePermissions ?? Enumerable.Empty<RolePermission>())
                     .Select(rp => rp.Permission?.PermissionName)
                     .Where(pn => !string.IsNullOrEmpty(pn))
+                    .Select(p => p!)
                     .Distinct()
                     .ToList() ?? new List<string>();
             }
@@ -460,7 +443,7 @@ namespace quanlyfilesBE.Controllers;
                 token,
                 user = new
                 {
-                    user.UserId,
+                    user!.UserId,
                     user.UserName,
                     user.FullName,
                     user.Email,

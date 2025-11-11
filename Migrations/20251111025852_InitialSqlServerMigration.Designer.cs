@@ -12,8 +12,8 @@ using quanlyfilesBE.Data;
 namespace quanlyfilesBE.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20251028083031_AddAuthEntities")]
-    partial class AddAuthEntities
+    [Migration("20251111025852_InitialSqlServerMigration")]
+    partial class InitialSqlServerMigration
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -175,6 +175,42 @@ namespace quanlyfilesBE.Migrations
                     b.ToTable("RolePermissions", (string)null);
                 });
 
+            modelBuilder.Entity("quanlyfilesBE.Models.Setting", b =>
+                {
+                    b.Property<int>("SettingId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("SettingId"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("SettingId");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.ToTable("Settings", (string)null);
+                });
+
             modelBuilder.Entity("quanlyfilesBE.Models.User", b =>
                 {
                     b.Property<int>("UserId")
@@ -187,6 +223,10 @@ namespace quanlyfilesBE.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("FirebaseUID")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
@@ -208,6 +248,10 @@ namespace quanlyfilesBE.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.HasKey("UserId");
+
+                    b.HasIndex("FirebaseUID")
+                        .IsUnique()
+                        .HasFilter("[FirebaseUID] IS NOT NULL");
 
                     b.HasIndex("UserName")
                         .IsUnique();

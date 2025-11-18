@@ -1,6 +1,25 @@
 # Script to stop running app and rebuild
 Write-Host "Stopping running application..." -ForegroundColor Yellow
 
+# Kill process using port 5000
+Write-Host "Checking for processes using port 5000..." -ForegroundColor Cyan
+$port5000 = netstat -ano | findstr :5000
+if ($port5000) {
+    $pids = $port5000 | ForEach-Object {
+        if ($_ -match '\s+(\d+)\s*$') {
+            $matches[1]
+        }
+    } | Select-Object -Unique
+    
+    foreach ($pid in $pids) {
+        if ($pid -and $pid -ne "0") {
+            Write-Host "Killing process $pid using port 5000..." -ForegroundColor Yellow
+            taskkill /F /PID $pid 2>$null
+        }
+    }
+    Start-Sleep -Seconds 1
+}
+
 # Find and stop the running process
 $processes = Get-Process -Name "quanlyfilesBE" -ErrorAction SilentlyContinue
 if ($processes) {

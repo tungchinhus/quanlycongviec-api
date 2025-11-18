@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace quanlyfilesBE.DTOs;
 
@@ -25,6 +26,12 @@ public class CreateMachineAssignmentDto
 
     [StringLength(100)]
     public string? TeamLeader { get; set; }
+
+    [StringLength(4000)]
+    [JsonPropertyName("filePaths")]
+    public string? FilePath { get; set; }
+
+    public int Status { get; set; } = 1; // 1: new, 2: đang xử lý, 3: hoàn thành
 }
 
 public class UpdateMachineAssignmentDto
@@ -48,6 +55,12 @@ public class UpdateMachineAssignmentDto
 
     [StringLength(100)]
     public string? TeamLeader { get; set; }
+
+    [StringLength(4000)]
+    [JsonPropertyName("filePaths")]
+    public string? FilePath { get; set; }
+
+    public int? Status { get; set; } // 1: new, 2: đang xử lý, 3: hoàn thành
 }
 
 public class MachineAssignmentDto
@@ -60,6 +73,11 @@ public class MachineAssignmentDto
     public DateTime? DeliveryDate { get; set; }
     public string? Designer { get; set; }
     public string? TeamLeader { get; set; }
+    
+    [JsonPropertyName("filePaths")]
+    public string? FilePath { get; set; }
+    
+    public int Status { get; set; }
     public List<AssignmentApprovalDto>? AssignmentApprovals { get; set; }
     public List<WorkChangeDto>? WorkChanges { get; set; }
     public List<WorkItemDto>? WorkItems { get; set; }
@@ -143,5 +161,19 @@ public class CreateWorkItemDto
 
     [StringLength(500)]
     public string? Notes { get; set; }
+}
+
+public class WorkItemWithAssignmentDto
+{
+    public int WorkItemID { get; set; }
+    public int AssignmentID { get; set; }
+    public string? WorkType { get; set; }
+    public string? PersonName { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? ExpectedFinish { get; set; }
+    public DateTime? ActualFinish { get; set; }
+    public bool? PersonConfirmation { get; set; }
+    public string? Notes { get; set; }
+    public MachineAssignmentDto? Assignment { get; set; }
 }
 

@@ -278,7 +278,209 @@ async function createCompleteAssignment(formData) {
 }
 
 // ============================================
-// 7. VÍ DỤ DỮ LIỆU TỪ FORM
+// 7. UPLOAD FILE
+// ============================================
+
+/**
+ * Upload file cho assignment
+ * @param {File} file - File object từ input
+ * @param {number} assignmentId - ID của assignment
+ * @param {string} description - Mô tả file (optional)
+ * @returns {Promise<Object>} File đã upload
+ */
+async function uploadFile(file, assignmentId, description = null) {
+  try {
+    // Validate file size (50MB)
+    if (file.size > 50 * 1024 * 1024) {
+      throw new Error('File size exceeds 50MB');
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('assignmentId', assignmentId.toString());
+    if (description) {
+      formData.append('description', description);
+    }
+
+    const response = await fetch(`${API_BASE_URL}/files/upload`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+        // KHÔNG set Content-Type, browser sẽ tự động set multipart/form-data
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Upload failed');
+    }
+
+    const uploadedFile = await response.json();
+    console.log('File uploaded:', uploadedFile);
+    return uploadedFile;
+  } catch (error) {
+    console.error('Upload file error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Lấy tất cả files của một assignment
+ * @param {number} assignmentId - ID của assignment
+ * @returns {Promise<Array>} Danh sách files
+ */
+async function getFilesByAssignment(assignmentId) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/files/byAssignment/${assignmentId}`, {
+      headers: getHeaders()
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get files');
+    }
+
+    const files = await response.json();
+    console.log('Files:', files);
+    return files;
+  } catch (error) {
+    console.error('Get files error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Xóa file
+ * @param {number} fileId - ID của file
+ * @returns {Promise<void>}
+ */
+async function deleteFile(fileId) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/files/${fileId}`, {
+      method: 'DELETE',
+      headers: getHeaders()
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Delete failed');
+    }
+
+    console.log('File deleted successfully');
+  } catch (error) {
+    console.error('Delete file error:', error);
+    throw error;
+  }
+}
+
+// ============================================
+// 8. VÍ DỤ SỬ DỤNG - UPLOAD FILE
+// ============================================
+
+/**
+ * Ví dụ upload file cho assignment
+ */
+async function exampleUploadFile() {
+  try {
+    // 1. Đảm bảo đã login
+    if (!authToken) {
+      authToken = localStorage.getItem('token');
+      if (!authToken) {
+        throw new Error('Please login first');
+      }
+    }
+
+    // 2. Lấy file từ input
+    const fileInput = document.getElementById('fileInput');
+    if (!fileInput || !fileInput.files[0]) {
+      throw new Error('Please select a file');
+    }
+
+    const file = fileInput.files[0];
+    const assignmentId = 123; // Lấy từ form hoặc state
+    const description = 'File mô tả kỹ thuật';
+
+    // 3. Upload file
+    const uploadedFile = await uploadFile(file, assignmentId, description);
+    console.log('Uploaded file:', uploadedFile);
+
+    // 4. Lấy danh sách files của assignment
+    const files = await getFilesByAssignment(assignmentId);
+    console.log('All files:', files);
+
+    // 5. Xóa file (nếu cần)
+    // await deleteFile(uploadedFile.id);
+  } catch (error) {
+    console.error('Example upload error:', error);
+  }
+}
+
+// ============================================
+// 9. VÍ DỤ SỬ DỤNG - TẠO ASSIGNMENT VÀ UPLOAD FILE
+// ============================================
+
+/**
+ * Tạo assignment hoàn chỉnh và upload file
+ */
+async function createAssignmentWithFiles(formData, files) {
+  try {
+    // 1. Tạo assignment
+    const assignment = await createCompleteAssignment(formData);
+    const assignmentId = assignment.assignmentID;
+
+    // 2. Upload các files
+    const uploadPromises = files.map(file => 
+      uploadFile(file, assignmentId, `File cho ${assignment.machineName}`)
+    );
+
+    const uploadedFiles = await Promise.all(uploadPromises);
+    console.log('All files uploaded:', uploadedFiles);
+
+    return {
+      assignment,
+      files: uploadedFiles
+    };
+  } catch (error) {
+    console.error('Create assignment with files error:', error);
+    throw error;
+  }
+}
+
+// ============================================
+// 10. HTML EXAMPLE
+// ============================================
+
+/*
+<!-- HTML Example -->
+<input type="file" id="fileInput" accept=".pdf,.doc,.docx,.xls,.xlsx">
+<button onclick="exampleUploadFile()">Upload File</button>
+
+<script>
+  // Sử dụng các function đã định nghĩa ở trên
+</script>
+*/
+
+// ============================================
+// EXPORT (nếu sử dụng module)
+// ============================================
+
+// Export cho module
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    login,
+    createAssignment,
+    createWorkItem,
+    createWorkChange,
+    createCompleteAssignment,
+    uploadFile,
+    getFilesByAssignment,
+    deleteFile,
+    createAssignmentWithFiles
+  };
+}
+
+// ============================================
+// 11. VÍ DỤ DỮ LIỆU TỪ FORM
 // ============================================
 
 // Dữ liệu mẫu từ form "Tạo Giao Việc Mới"
@@ -299,7 +501,44 @@ const exampleFormData = {
 };
 
 // ============================================
-// 8. SỬ DỤNG
+// 8. LẤY DANH SÁCH WORK ITEMS CỦA USER ĐĂNG NHẬP
+// ============================================
+
+/**
+ * Lấy danh sách work items (công việc) của user đang đăng nhập
+ * @returns {Promise<Array>} Danh sách work items với thông tin assignment
+ */
+async function getMyWorkItems() {
+  try {
+    // Đảm bảo đã login
+    if (!authToken) {
+      authToken = localStorage.getItem('token');
+      if (!authToken) {
+        throw new Error('Please login first');
+      }
+    }
+
+    const response = await fetch(`${API_BASE_URL}/assignments/my-work-items`, {
+      method: 'GET',
+      headers: getHeaders()
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to get work items');
+    }
+
+    const workItems = await response.json();
+    console.log('My work items:', workItems);
+    return workItems;
+  } catch (error) {
+    console.error('Get my work items error:', error);
+    throw error;
+  }
+}
+
+// ============================================
+// 9. SỬ DỤNG
 // ============================================
 
 // Ví dụ sử dụng:
@@ -309,6 +548,10 @@ await login('username', 'password');
 
 // 2. Tạo assignment hoàn chỉnh
 await createCompleteAssignment(exampleFormData);
+
+// 3. Lấy danh sách work items của user đăng nhập
+const myWorkItems = await getMyWorkItems();
+console.log('Công việc của tôi:', myWorkItems);
 */
 
 // Export cho module
@@ -318,7 +561,8 @@ if (typeof module !== 'undefined' && module.exports) {
     createAssignment,
     createWorkItem,
     createWorkChange,
-    createCompleteAssignment
+    createCompleteAssignment,
+    getMyWorkItems
   };
 }
 

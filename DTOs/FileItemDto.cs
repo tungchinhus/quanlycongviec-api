@@ -4,6 +4,8 @@ namespace quanlyfilesBE.DTOs;
 
 public class CreateFileItemDto
 {
+    public int? AssignmentID { get; set; }
+
     [Required]
     [StringLength(255)]
     public string FileName { get; set; } = string.Empty;

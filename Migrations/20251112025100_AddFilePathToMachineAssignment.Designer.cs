@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using quanlyfilesBE.Data;
 
@@ -11,9 +12,11 @@ using quanlyfilesBE.Data;
 namespace quanlyfilesBE.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251112025100_AddFilePathToMachineAssignment")]
+    partial class AddFilePathToMachineAssignment
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -63,9 +66,6 @@ namespace quanlyfilesBE.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int?>("AssignmentID")
-                        .HasColumnType("int");
-
                     b.Property<string>("Description")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
@@ -97,8 +97,6 @@ namespace quanlyfilesBE.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("AssignmentID");
 
                     b.HasIndex("FileName");
 
@@ -165,8 +163,8 @@ namespace quanlyfilesBE.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("FilePath")
-                        .HasMaxLength(4000)
-                        .HasColumnType("nvarchar(4000)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("MachineName")
                         .IsRequired()
@@ -300,86 +298,6 @@ namespace quanlyfilesBE.Migrations
                         .IsUnique();
 
                     b.ToTable("Settings", (string)null);
-                });
-
-            modelBuilder.Entity("quanlyfilesBE.Models.TSMay", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int?>("CongSuat")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Io")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("LSX")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("Pk75H1")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("Pk75H2")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("Po")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("SBB")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("SoMay")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("TBKT")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("TChuanLSX")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("UdmHVH1")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("UdmHVH2")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("UdmLV")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("Uk75H1")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("Uk75H2")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CongSuat");
-
-                    b.HasIndex("LSX");
-
-                    b.HasIndex("SBB");
-
-                    b.HasIndex("SoMay");
-
-                    b.ToTable("TSMay", (string)null);
                 });
 
             modelBuilder.Entity("quanlyfilesBE.Models.TechnicalNotification", b =>
@@ -637,16 +555,6 @@ namespace quanlyfilesBE.Migrations
                         .HasForeignKey("AssignmentID")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("MachineAssignment");
-                });
-
-            modelBuilder.Entity("quanlyfilesBE.Models.FileItem", b =>
-                {
-                    b.HasOne("quanlyfilesBE.Models.MachineAssignment", "MachineAssignment")
-                        .WithMany()
-                        .HasForeignKey("AssignmentID")
-                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("MachineAssignment");
                 });

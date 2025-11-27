@@ -9,6 +9,12 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Cấu hình JSON serializer để nhận camelCase từ frontend
+        options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+        options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    })
     .ConfigureApiBehaviorOptions(options =>
     {
         options.SuppressModelStateInvalidFilter = true;
@@ -37,16 +43,27 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Add CORS - Allow Angular frontend
+// Cấu hình CORS theo hướng dẫn: https://docs.microsoft.com/en-us/aspnet/core/security/cors
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAngularApp",
-        policy =>
-        {
-            policy.WithOrigins("http://localhost:4200") // Angular default port
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials();
-        });
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy.WithOrigins(
+                "http://localsite.thibidi.com",  // Production frontend
+                "http://localhost:4200"           // Development Angular default port
+            )
+            .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")  // Explicit methods
+            .WithHeaders(
+                "Content-Type",
+                "Authorization",
+                "X-Requested-With",
+                "Accept",
+                "Origin"
+            )  // Explicit headers
+            .AllowCredentials()  // Cho phép gửi cookies/credentials
+            .WithExposedHeaders("Authorization")  // Expose Authorization header cho frontend
+            .SetPreflightMaxAge(TimeSpan.FromHours(24));  // Cache preflight requests trong 24 giờ
+    });
 });
 
 // Note: Using Swashbuckle (AddSwaggerGen) instead of AddOpenApi to avoid conflicts
@@ -122,11 +139,42 @@ app.UseSwaggerUI(c =>
     c.DisplayRequestDuration();
 });
 
-// Enable CORS - must be before UseHttpsRedirection
-app.UseCors("AllowAngularApp");
+// Enable CORS - MUST be before UseRouting, UseAuthentication, UseAuthorization
+// Order: CORS → Routing → Authentication → Authorization
+app.UseCors("AllowFrontend");
 
-// HTTPS Redirection
-app.UseHttpsRedirection();
+// Optional: Log CORS-related requests for debugging (remove in production)
+if (app.Environment.IsDevelopment())
+{
+    app.Use(async (context, next) =>
+    {
+        var origin = context.Request.Headers["Origin"].ToString();
+        var method = context.Request.Method;
+        var path = context.Request.Path;
+        var query = context.Request.QueryString;
+        Console.WriteLine($"[CORS Debug] Method: {method}, Origin: {origin}, Path: {path}{query}");
+        await next();
+    });
+}
+
+// HTTPS Redirection - Disable for HTTP-only environments
+// Uncomment if you need HTTPS redirection
+// app.UseHttpsRedirection();
+
+// Routing must be explicitly called before Authentication/Authorization
+app.UseRouting();
+
+// Logging middleware để debug routing
+if (app.Environment.IsDevelopment())
+{
+    app.Use(async (context, next) =>
+    {
+        var path = context.Request.Path;
+        var method = context.Request.Method;
+        Console.WriteLine($"[Routing Debug] {method} {path}");
+        await next();
+    });
+}
 
 app.UseAuthentication();
 app.UseAuthorization();

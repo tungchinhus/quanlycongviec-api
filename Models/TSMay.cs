@@ -18,5 +18,6 @@ public class TSMay
     public string? UdmHVH1 { get; set; }
     public string? UdmHVH2 { get; set; }
     public string? UdmLV { get; set; }
+    public string? Phase { get; set; }
 }
 

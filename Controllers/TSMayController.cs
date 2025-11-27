@@ -89,7 +89,8 @@ public class TSMayController : ControllerBase
                 Uk75H2 = dto.Uk75H2,
                 UdmHVH1 = dto.UdmHVH1,
                 UdmHVH2 = dto.UdmHVH2,
-                UdmLV = dto.UdmLV
+                UdmLV = dto.UdmLV,
+                Phase = dto.Phase
             };
 
             _context.TSMay.Add(newItem);
@@ -148,7 +149,8 @@ public class TSMayController : ControllerBase
                             Uk75H2 = itemDto.Uk75H2,
                             UdmHVH1 = itemDto.UdmHVH1,
                             UdmHVH2 = itemDto.UdmHVH2,
-                            UdmLV = itemDto.UdmLV
+                            UdmLV = itemDto.UdmLV,
+                            Phase = itemDto.Phase
                         };
 
                         _context.TSMay.Add(newItem);
@@ -267,6 +269,9 @@ public class TSMayController : ControllerBase
             
             if (dto.UdmLV != null)
                 existingItem.UdmLV = dto.UdmLV;
+            
+            if (dto.Phase != null)
+                existingItem.Phase = dto.Phase;
 
             await _context.SaveChangesAsync();
 
@@ -310,16 +315,50 @@ public class TSMayController : ControllerBase
 
     // GET: api/tsmay/search
     [HttpGet("search")]
-    public async Task<ActionResult<IEnumerable<TSMay>>> Search(
+    public async Task<ActionResult<SearchTSMayResponseDto>> Search(
+        [FromQuery] string? search = null,
         [FromQuery] string? soMay = null,
         [FromQuery] string? sbb = null,
         [FromQuery] string? lsx = null,
-        [FromQuery] int? congSuat = null)
+        [FromQuery] int? congSuat = null,
+        [FromQuery] string? phase = null,
+        [FromQuery] int page = 0,
+        [FromQuery] int pageSize = 10)
     {
         try
         {
+            // Validate pagination parameters
+            if (page < 0)
+            {
+                return BadRequest(new { error = "Invalid page parameter (must be >= 0)" });
+            }
+            if (pageSize < 1 || pageSize > 1000)
+            {
+                return BadRequest(new { error = "Invalid pageSize parameter (must be between 1 and 1000)" });
+            }
+
+            // Validate phase parameter
+            if (!string.IsNullOrEmpty(phase) && phase != "1" && phase != "3")
+            {
+                return BadRequest(new { error = "Phase phải là '1' (1 pha) hoặc '3' (3 pha)" });
+            }
+
             var query = _context.TSMay.AsQueryable();
 
+            // Search text: Tìm kiếm tổng quát trong nhiều cột
+            if (!string.IsNullOrEmpty(search))
+            {
+                query = query.Where(x =>
+                    (x.SoMay != null && x.SoMay.Contains(search)) ||
+                    (x.SBB != null && x.SBB.Contains(search)) ||
+                    (x.LSX != null && x.LSX.Contains(search)) ||
+                    (x.TChuanLSX != null && x.TChuanLSX.Contains(search)) ||
+                    (x.TBKT != null && x.TBKT.Contains(search)) ||
+                    (x.CongSuat.HasValue && x.CongSuat.Value.ToString().Contains(search))
+                );
+            }
+
+            // Filter cụ thể (ưu tiên hơn search text nếu có)
             if (!string.IsNullOrEmpty(soMay))
                 query = query.Where(x => x.SoMay == soMay);
             
@@ -331,12 +370,30 @@ public class TSMayController : ControllerBase
             
             if (congSuat.HasValue)
                 query = query.Where(x => x.CongSuat == congSuat.Value);
+            
+            if (!string.IsNullOrEmpty(phase))
+                query = query.Where(x => x.Phase == phase);
 
+            // Count total before pagination
+            var total = await query.CountAsync();
+
+            // Apply pagination
             var results = await query
                 .OrderByDescending(x => x.Id)
+                .Skip(page * pageSize)
+                .Take(pageSize)
                 .ToListAsync();
 
-            return Ok(results);
+            // Return new format
+            var response = new SearchTSMayResponseDto
+            {
+                Data = results,
+                Total = total,
+                Page = page,
+                PageSize = pageSize
+            };
+
+            return Ok(response);
         }
         catch (Exception ex)
         {

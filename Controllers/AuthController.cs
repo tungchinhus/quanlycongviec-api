@@ -82,40 +82,72 @@ namespace quanlyfilesBE.Controllers;
     [AllowAnonymous]
     public async Task<IActionResult> Login([FromBody] LoginRequest req)
     {
-        // Cho phép đăng nhập bằng userName hoặc email
-        var user = await _db.Users
-            .Include(u => u.UserRoles)
-            .ThenInclude(ur => ur.Role)
-            .ThenInclude(r => r.RolePermissions)
-            .ThenInclude(rp => rp.Permission)
-            .FirstOrDefaultAsync(u => 
-                u.UserName == req.UserName || 
-                u.Email == req.UserName);
+        try
+        {
+            // Cho phép đăng nhập bằng userName hoặc email
+            var user = await _db.Users
+                .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+                .ThenInclude(r => r.RolePermissions)
+                .ThenInclude(rp => rp.Permission)
+                .FirstOrDefaultAsync(u => 
+                    u.UserName == req.UserName || 
+                    u.Email == req.UserName);
 
-        if (user == null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
-            return Unauthorized("Invalid username/email or password");
+            if (user == null)
+                return Unauthorized("Invalid username/email or password");
 
-        if (!user.IsActive)
-            return Unauthorized("User account is inactive");
+            // Check if PasswordHash is null or empty
+            if (string.IsNullOrEmpty(user.PasswordHash))
+                return Unauthorized("Invalid username/email or password");
 
-        var roleNames = user.UserRoles.Select(ur => ur.Role.RoleName).Distinct().ToList();
-        var permissions = user.UserRoles
-            .SelectMany(ur => ur.Role.RolePermissions)
-            .Select(rp => rp.Permission.PermissionName)
-            .Distinct()
-            .ToList();
+            // Verify password
+            if (!BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
+                return Unauthorized("Invalid username/email or password");
 
-        var token = GenerateJwt(user, roleNames, permissions);
-        return Ok(new { 
-            token, 
-            user = new { 
-                user.UserId, 
-                user.UserName, 
-                user.FullName, 
-                user.Email,
-                roles = roleNames
-            } 
-        });
+            if (!user.IsActive)
+                return Unauthorized("User account is inactive");
+
+            // Get roles with null checks
+            var roleNames = user.UserRoles?
+                .Select(ur => ur.Role?.RoleName)
+                .Where(rn => !string.IsNullOrEmpty(rn))
+                .Select(r => r!)
+                .Distinct()
+                .ToList() ?? new List<string>();
+
+            // Get permissions with null checks
+            var permissions = user.UserRoles?
+                .SelectMany(ur => ur.Role?.RolePermissions ?? Enumerable.Empty<RolePermission>())
+                .Select(rp => rp.Permission?.PermissionName)
+                .Where(pn => !string.IsNullOrEmpty(pn))
+                .Select(p => p!)
+                .Distinct()
+                .ToList() ?? new List<string>();
+
+            var token = GenerateJwt(user, roleNames, permissions);
+            return Ok(new { 
+                token, 
+                user = new { 
+                    user.UserId, 
+                    user.UserName, 
+                    user.FullName, 
+                    user.Email,
+                    roles = roleNames
+                } 
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in Login: {Message}, StackTrace: {StackTrace}", 
+                ex.Message, ex.StackTrace);
+            
+            return StatusCode(500, new { 
+                error = "Error during login", 
+                message = ex.Message,
+                innerException = ex.InnerException?.Message
+            });
+        }
     }
 
     [HttpPost("login/firebase")]

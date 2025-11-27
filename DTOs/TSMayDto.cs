@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using quanlyfilesBE.Models;
 
 namespace quanlyfilesBE.DTOs;
 
@@ -47,6 +48,10 @@ public class CreateTSMayDto
 
     [StringLength(50)]
     public string? UdmLV { get; set; }
+
+    [StringLength(1)]
+    [RegularExpression("^[13]$", ErrorMessage = "Phase phải là '1' (1 pha) hoặc '3' (3 pha)")]
+    public string? Phase { get; set; }
 }
 
 public class UpdateTSMayDto
@@ -94,6 +99,10 @@ public class UpdateTSMayDto
 
     [StringLength(50)]
     public string? UdmLV { get; set; }
+
+    [StringLength(1)]
+    [RegularExpression("^[13]$", ErrorMessage = "Phase phải là '1' (1 pha) hoặc '3' (3 pha)")]
+    public string? Phase { get; set; }
 }
 
 public class BulkCreateTSMayDto
@@ -118,5 +127,13 @@ public class BulkCreateErrorDto
     public int Index { get; set; }
     public CreateTSMayDto Data { get; set; } = new();
     public string Error { get; set; } = string.Empty;
+}
+
+public class SearchTSMayResponseDto
+{
+    public List<TSMay> Data { get; set; } = new();
+    public int Total { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
 }
 

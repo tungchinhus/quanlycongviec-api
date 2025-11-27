@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.IO;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
 using quanlyfilesBE.Data;
@@ -32,6 +33,36 @@ public class FilesController : ControllerBase
     public async Task<ActionResult<IEnumerable<FileItem>>> GetFiles()
     {
         return await _context.Files.ToListAsync();
+    }
+
+    // GET: api/Files/{id}/download - Phải đặt trước [HttpGet("{id}")] để tránh conflict routing
+    [HttpGet("{id}/download")]
+    public async Task<IActionResult> DownloadFile(int id)
+    {
+        try
+        {
+            var file = await _context.Files.FindAsync(id);
+            if (file == null)
+            {
+                return NotFound(new { message = "Không tìm thấy file" });
+            }
+
+            var filePath = file.FilePath;
+            if (string.IsNullOrWhiteSpace(filePath) || !System.IO.File.Exists(filePath))
+            {
+                return NotFound(new { message = "File không tồn tại trên server" });
+            }
+
+            var fileBytes = await System.IO.File.ReadAllBytesAsync(filePath);
+            var contentType = GetContentType(file.FileType ?? Path.GetExtension(file.FileName));
+            
+            return File(fileBytes, contentType, file.FileName);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error downloading file: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error downloading file", message = ex.Message });
+        }
     }
 
     // GET: api/Files/5
@@ -210,6 +241,26 @@ public class FilesController : ControllerBase
         return Ok(files);
     }
 
+    private string GetContentType(string fileType)
+    {
+        var extension = Path.GetExtension(fileType).ToLowerInvariant();
+        return extension switch
+        {
+            ".pdf" => "application/pdf",
+            ".doc" => "application/msword",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls" => "application/vnd.ms-excel",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".txt" => "text/plain",
+            ".zip" => "application/zip",
+            ".rar" => "application/x-rar-compressed",
+            _ => "application/octet-stream"
+        };
+    }
+
     // POST: api/Files/upload
     [HttpPost("upload")]
     public async Task<ActionResult<FileItem>> UploadFile(IFormFile file, [FromForm] string? description = null, [FromForm] int assignmentId = 0)
@@ -248,9 +299,18 @@ public class FilesController : ControllerBase
             }
 
             // Create directory if it doesn't exist
-            if (!Directory.Exists(storagePath))
+            try
             {
-                Directory.CreateDirectory(storagePath);
+                if (!Directory.Exists(storagePath))
+                {
+                    Directory.CreateDirectory(storagePath);
+                    _logger?.LogInformation("Created storage directory: {StoragePath}", storagePath);
+                }
+            }
+            catch (Exception dirEx)
+            {
+                _logger?.LogError(dirEx, "Error creating storage directory: {StoragePath}", storagePath);
+                return StatusCode(500, new { error = "Error creating storage directory", message = dirEx.Message, path = storagePath });
             }
 
             // Generate unique filename to avoid conflicts
@@ -260,9 +320,18 @@ public class FilesController : ControllerBase
             var filePath = Path.Combine(storagePath, uniqueFileName);
 
             // Save file to disk
-            using (var stream = new FileStream(filePath, FileMode.Create))
+            try
             {
-                await file.CopyToAsync(stream);
+                using (var stream = new FileStream(filePath, FileMode.Create))
+                {
+                    await file.CopyToAsync(stream);
+                }
+                _logger?.LogInformation("File saved successfully: {FilePath}", filePath);
+            }
+            catch (Exception saveEx)
+            {
+                _logger?.LogError(saveEx, "Error saving file to disk: {FilePath}", filePath);
+                return StatusCode(500, new { error = "Error saving file to disk", message = saveEx.Message, path = filePath });
             }
 
             // Get file type from content type or extension

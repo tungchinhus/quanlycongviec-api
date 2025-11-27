@@ -66,6 +66,8 @@ public class UpdateMachineAssignmentDto
 public class MachineAssignmentDto
 {
     public int AssignmentID { get; set; }
+    
+    [JsonPropertyName("tbkt_ID")]
     public string TBKT_ID { get; set; } = string.Empty;
     public string MachineName { get; set; } = string.Empty;
     public string? StandardRequirement { get; set; }
@@ -148,6 +150,23 @@ public class CreateWorkItemDto
     [Required]
     public int AssignmentID { get; set; }
 
+    [StringLength(100)]
+    public string? WorkType { get; set; }
+
+    [StringLength(100)]
+    public string? PersonName { get; set; }
+
+    public DateTime? StartDate { get; set; }
+    public DateTime? ExpectedFinish { get; set; }
+    public DateTime? ActualFinish { get; set; }
+    public bool? PersonConfirmation { get; set; }
+
+    [StringLength(500)]
+    public string? Notes { get; set; }
+}
+
+public class UpdateWorkItemDto
+{
     [StringLength(100)]
     public string? WorkType { get; set; }
 

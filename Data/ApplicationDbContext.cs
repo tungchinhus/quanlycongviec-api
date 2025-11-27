@@ -346,11 +346,15 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.UdmLV)
                 .HasMaxLength(50)
                 .HasColumnType("nvarchar(50)");
+            entity.Property(e => e.Phase)
+                .HasMaxLength(1)
+                .HasColumnType("nchar(1)");
             
             entity.HasIndex(e => e.SoMay);
             entity.HasIndex(e => e.SBB);
             entity.HasIndex(e => e.LSX);
             entity.HasIndex(e => e.CongSuat);
+            entity.HasIndex(e => e.Phase);
         });
 
         // Seed initial admin role and permission if table is empty at migration time handled separately

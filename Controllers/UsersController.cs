@@ -812,14 +812,19 @@ public class UsersController : ControllerBase
         await _db.SaveChangesAsync();
 
         // Reload with roles
-        existingUser = await _db.Users
+        var reloadedUser = await _db.Users
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.UserId == existingUser.UserId);
 
+        if (reloadedUser == null)
+            return BadRequest("Failed to reload user after update");
+
+        existingUser = reloadedUser;
+
         var userDto = new UserDto
         {
-            UserId = existingUser!.UserId,
+            UserId = existingUser.UserId,
             UserName = existingUser.UserName,
             FullName = existingUser.FullName,
             Email = existingUser.Email,
@@ -1546,16 +1551,19 @@ public class UsersController : ControllerBase
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning(ex, "Failed to update Firebase custom claims for user {UserId}", user.UserId);
+                _logger?.LogWarning(ex, "Failed to update Firebase custom claims for user {UserId}", user?.UserId ?? 0);
                 // Không throw error, chỉ log warning
             }
         }
 
         // Reload với roles
-        user = await _db.Users
-            .Include(u => u.UserRoles)
-            .ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.UserId == user.UserId);
+        if (user != null)
+        {
+            user = await _db.Users
+                .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+                .FirstOrDefaultAsync(u => u.UserId == user.UserId);
+        }
 
         if (user == null)
             return BadRequest("Failed to reload user after role update");

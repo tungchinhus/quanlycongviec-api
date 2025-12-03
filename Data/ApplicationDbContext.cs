@@ -262,6 +262,11 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.PersonName).HasMaxLength(100);
             entity.Property(e => e.Notes).HasMaxLength(500);
             
+            // PersonConfirmation - should be bit in database
+            // If database still has nvarchar, run migration script to convert
+            entity.Property(e => e.PersonConfirmation)
+                .HasColumnType("bit"); // Change to bit after running migration
+            
             entity.HasOne(e => e.MachineAssignment)
                   .WithMany(ma => ma.WorkItems)
                   .HasForeignKey(e => e.AssignmentID)

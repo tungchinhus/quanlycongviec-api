@@ -132,15 +132,19 @@ public class FilesController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteFile(int id)
     {
+        // Use transaction to ensure atomicity
+        using var transaction = await _context.Database.BeginTransactionAsync();
+        string? filePath = null;
         try
         {
             var file = await _context.Files.FindAsync(id);
             if (file == null)
             {
+                await transaction.RollbackAsync();
                 return NotFound(new { message = "Không tìm thấy file để xóa" });
             }
 
-            var filePath = file.FilePath;
+            filePath = file.FilePath;
             var assignmentId = file.AssignmentID;
 
             // If file has AssignmentID, update that specific assignment
@@ -191,28 +195,37 @@ public class FilesController : ControllerBase
                 }
             }
 
-            // Delete physical file from disk
-            if (System.IO.File.Exists(filePath))
+            // Remove file record from database FIRST
+            _context.Files.Remove(file);
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            // Only delete physical file AFTER successful database deletion
+            if (!string.IsNullOrWhiteSpace(filePath) && System.IO.File.Exists(filePath))
             {
                 try
                 {
                     System.IO.File.Delete(filePath);
+                    _logger?.LogInformation("Deleted physical file: {FilePath}", filePath);
                 }
                 catch (Exception ex)
                 {
-                    _logger?.LogWarning(ex, "Could not delete physical file: {FilePath}", filePath);
-                    // Continue with database deletion even if physical file deletion fails
+                    _logger?.LogWarning(ex, "Could not delete physical file after database deletion: {FilePath}", filePath);
+                    // Database record is already deleted, so we continue
                 }
             }
 
-            // Remove file record from database
-            _context.Files.Remove(file);
-            await _context.SaveChangesAsync();
-
             return NoContent();
+        }
+        catch (DbUpdateException dbEx)
+        {
+            await transaction.RollbackAsync();
+            _logger?.LogError(dbEx, "Database error deleting file: {Message}", dbEx.Message);
+            return StatusCode(500, new { error = "Error deleting file from database", message = dbEx.InnerException?.Message ?? dbEx.Message });
         }
         catch (Exception ex)
         {
+            await transaction.RollbackAsync();
             _logger?.LogError(ex, "Error deleting file: {Message}", ex.Message);
             return StatusCode(500, new { error = "Error deleting file", message = ex.Message });
         }
@@ -340,48 +353,110 @@ public class FilesController : ControllerBase
             // Get uploaded by from claims
             var uploadedBy = User.Identity?.Name ?? "Unknown";
 
-            // Create file record
-            var fileItem = new FileItem
+            // Use transaction to ensure atomicity - if database save fails, rollback and cleanup file
+            FileItem fileItem;
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
             {
-                AssignmentID = assignmentId,
-                FileName = fileName,
-                FilePath = filePath,
-                FileType = fileType,
-                FileSize = file.Length,
-                UploadDate = DateTime.Now,
-                UploadedBy = uploadedBy,
-                Description = description
-            };
+                // Create file record
+                fileItem = new FileItem
+                {
+                    AssignmentID = assignmentId,
+                    FileName = fileName,
+                    FilePath = filePath,
+                    FileType = fileType,
+                    FileSize = file.Length,
+                    UploadDate = DateTime.Now,
+                    UploadedBy = uploadedBy,
+                    Description = description
+                };
 
-            _context.Files.Add(fileItem);
-            await _context.SaveChangesAsync();
+                // Update MachineAssignment.FilePath - append new filePath with semicolon separator
+                if (string.IsNullOrWhiteSpace(assignment.FilePath))
+                {
+                    assignment.FilePath = filePath;
+                }
+                else
+                {
+                    // Check if filePath length would exceed max length (4000 chars)
+                    var newFilePath = $"{assignment.FilePath};{filePath}";
+                    if (newFilePath.Length > 4000)
+                    {
+                        _logger?.LogWarning("FilePath would exceed max length. Truncating or skipping assignment update.");
+                        // Don't update assignment, just save file
+                    }
+                    else
+                    {
+                        assignment.FilePath = newFilePath;
+                    }
+                }
 
-            // Update MachineAssignment.FilePath - append new filePath with semicolon separator
-            if (string.IsNullOrWhiteSpace(assignment.FilePath))
-            {
-                assignment.FilePath = filePath;
+                // Save both changes in a single transaction
+                _context.Files.Add(fileItem);
+                await _context.SaveChangesAsync();
+                
+                // Commit transaction if everything succeeds
+                await transaction.CommitAsync();
+                _logger?.LogInformation("File uploaded and saved successfully: {FilePath}", filePath);
+
+                // Create response after successful commit
+                var response = new
+                {
+                    id = fileItem.Id,
+                    fileName = fileItem.FileName,
+                    filePath = filePath,
+                    fileType = fileItem.FileType,
+                    fileSize = fileItem.FileSize,
+                    uploadDate = fileItem.UploadDate,
+                    uploadedBy = fileItem.UploadedBy,
+                    description = fileItem.Description,
+                    assignmentId = assignmentId
+                };
+
+                return Ok(response);
             }
-            else
+            catch (DbUpdateException dbEx)
             {
-                assignment.FilePath = $"{assignment.FilePath};{filePath}";
+                await transaction.RollbackAsync();
+                _logger?.LogError(dbEx, "Database error saving file: {Message}", dbEx.Message);
+                
+                // Cleanup file on disk if database save failed
+                try
+                {
+                    if (System.IO.File.Exists(filePath))
+                    {
+                        System.IO.File.Delete(filePath);
+                        _logger?.LogInformation("Cleaned up file after database error: {FilePath}", filePath);
+                    }
+                }
+                catch (Exception cleanupEx)
+                {
+                    _logger?.LogWarning(cleanupEx, "Could not cleanup file after database error: {FilePath}", filePath);
+                }
+                
+                return StatusCode(500, new { error = "Error saving file to database", message = dbEx.InnerException?.Message ?? dbEx.Message });
             }
-
-            await _context.SaveChangesAsync();
-
-            var response = new
+            catch (Exception ex)
             {
-                id = fileItem.Id,
-                fileName = fileItem.FileName,
-                filePath = filePath,
-                fileType = fileItem.FileType,
-                fileSize = fileItem.FileSize,
-                uploadDate = fileItem.UploadDate,
-                uploadedBy = fileItem.UploadedBy,
-                description = fileItem.Description,
-                assignmentId = assignmentId
-            };
-
-            return Ok(response);
+                await transaction.RollbackAsync();
+                _logger?.LogError(ex, "Unexpected error uploading file: {Message}", ex.Message);
+                
+                // Cleanup file on disk if any error occurs
+                try
+                {
+                    if (System.IO.File.Exists(filePath))
+                    {
+                        System.IO.File.Delete(filePath);
+                        _logger?.LogInformation("Cleaned up file after error: {FilePath}", filePath);
+                    }
+                }
+                catch (Exception cleanupEx)
+                {
+                    _logger?.LogWarning(cleanupEx, "Could not cleanup file after error: {FilePath}", filePath);
+                }
+                
+                return StatusCode(500, new { error = "Error uploading file", message = ex.Message });
+            }
         }
         catch (Exception ex)
         {

@@ -627,38 +627,86 @@ public class AssignmentsController : ControllerBase
             // Tìm work items theo PersonName
             // PersonName có thể là: UserId (string), FullName, hoặc UserName
             var userIdString = userId.ToString();
-            var workItems = await _context.WorkItems
-                .Include(wi => wi.MachineAssignment)
-                .Where(wi => wi.PersonName == userIdString 
-                    || wi.PersonName == user.FullName 
-                    || wi.PersonName == user.UserName)
-                .OrderByDescending(wi => wi.StartDate ?? DateTime.MinValue)
+            
+            // Query work items using raw SQL to handle PersonConfirmation type conversion
+            // This avoids InvalidCastException when database has string instead of bit
+            var workItemsData = await _context.Database.SqlQueryRaw<WorkItemRawData>(
+                @"SELECT 
+                    wi.WorkItemID,
+                    wi.AssignmentID,
+                    wi.WorkType,
+                    wi.PersonName,
+                    wi.StartDate,
+                    wi.ExpectedFinish,
+                    wi.ActualFinish,
+                    CAST(wi.PersonConfirmation AS NVARCHAR(10)) AS PersonConfirmationRaw,
+                    wi.Notes
+                  FROM WorkItem wi
+                  WHERE wi.PersonName = {0} OR wi.PersonName = {1} OR wi.PersonName = {2}
+                  ORDER BY wi.StartDate DESC",
+                userIdString,
+                user.FullName ?? "",
+                user.UserName ?? "").ToListAsync();
+
+            // Get assignment IDs to load MachineAssignments
+            var assignmentIds = workItemsData.Select(w => w.AssignmentID).Distinct().ToList();
+            var assignments = await _context.MachineAssignments
+                .Where(ma => assignmentIds.Contains(ma.AssignmentID))
+                .AsNoTracking()
                 .ToListAsync();
 
-            var workItemDtos = workItems.Select(wi => new WorkItemWithAssignmentDto
+            // Convert PersonConfirmation from string to bool
+            bool? ConvertPersonConfirmation(string? rawValue)
             {
-                WorkItemID = wi.WorkItemID,
-                AssignmentID = wi.AssignmentID,
-                WorkType = wi.WorkType,
-                PersonName = wi.PersonName,
-                StartDate = wi.StartDate,
-                ExpectedFinish = wi.ExpectedFinish,
-                ActualFinish = wi.ActualFinish,
-                PersonConfirmation = wi.PersonConfirmation,
-                Notes = wi.Notes,
-                Assignment = wi.MachineAssignment != null ? new MachineAssignmentDto
+                if (string.IsNullOrWhiteSpace(rawValue))
+                    return null;
+                
+                var trimmed = rawValue.Trim();
+                if (bool.TryParse(trimmed, out bool boolValue))
+                    return boolValue;
+                
+                if (trimmed.Equals("1", StringComparison.OrdinalIgnoreCase) || 
+                    trimmed.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Equals("yes", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                
+                if (trimmed.Equals("0", StringComparison.OrdinalIgnoreCase) || 
+                    trimmed.Equals("false", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Equals("no", StringComparison.OrdinalIgnoreCase))
+                    return false;
+                
+                return null;
+            }
+
+            var workItemDtos = workItemsData.Select(wi => 
+            {
+                var assignment = assignments.FirstOrDefault(a => a.AssignmentID == wi.AssignmentID);
+                
+                return new WorkItemWithAssignmentDto
                 {
-                    AssignmentID = wi.MachineAssignment.AssignmentID,
-                    TBKT_ID = wi.MachineAssignment.TBKT_ID,
-                    MachineName = wi.MachineAssignment.MachineName,
-                    StandardRequirement = wi.MachineAssignment.StandardRequirement,
-                    AdditionalRequest = wi.MachineAssignment.AdditionalRequest,
-                    DeliveryDate = wi.MachineAssignment.DeliveryDate,
-                    Designer = wi.MachineAssignment.Designer,
-                    TeamLeader = wi.MachineAssignment.TeamLeader,
-                    FilePath = wi.MachineAssignment.FilePath,
-                    Status = wi.MachineAssignment.Status
-                } : null
+                    WorkItemID = wi.WorkItemID,
+                    AssignmentID = wi.AssignmentID,
+                    WorkType = wi.WorkType,
+                    PersonName = wi.PersonName,
+                    StartDate = wi.StartDate,
+                    ExpectedFinish = wi.ExpectedFinish,
+                    ActualFinish = wi.ActualFinish,
+                    PersonConfirmation = ConvertPersonConfirmation(wi.PersonConfirmationRaw),
+                    Notes = wi.Notes,
+                    Assignment = assignment != null ? new MachineAssignmentDto
+                    {
+                        AssignmentID = assignment.AssignmentID,
+                        TBKT_ID = assignment.TBKT_ID,
+                        MachineName = assignment.MachineName,
+                        StandardRequirement = assignment.StandardRequirement,
+                        AdditionalRequest = assignment.AdditionalRequest,
+                        DeliveryDate = assignment.DeliveryDate,
+                        Designer = assignment.Designer,
+                        TeamLeader = assignment.TeamLeader,
+                        FilePath = assignment.FilePath,
+                        Status = assignment.Status
+                    } : null
+                };
             }).ToList();
 
             return Ok(workItemDtos);
@@ -669,5 +717,19 @@ public class AssignmentsController : ControllerBase
             return StatusCode(500, new { error = "Error retrieving work items", message = ex.Message });
         }
     }
+}
+
+// Helper class for raw SQL query result to handle PersonConfirmation type conversion
+internal class WorkItemRawData
+{
+    public int WorkItemID { get; set; }
+    public int AssignmentID { get; set; }
+    public string? WorkType { get; set; }
+    public string? PersonName { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? ExpectedFinish { get; set; }
+    public DateTime? ActualFinish { get; set; }
+    public string? PersonConfirmationRaw { get; set; }
+    public string? Notes { get; set; }
 }
 

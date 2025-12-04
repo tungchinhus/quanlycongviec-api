@@ -6,6 +6,8 @@ public class ExcelExportRequest
 {
     [Required]
     public List<StatisticsDataDto> StatisticsData { get; set; } = new();
+    
+    public ChartConfigDto? ChartConfig { get; set; }
 }
 
 public class StatisticsDataDto
@@ -38,4 +40,16 @@ public class StatisticsDataDto
     public double? UkH2Min { get; set; }
     public double? UkH2Delta { get; set; }
 }
+
+public class ChartConfigDto
+{
+    public bool ShowChart { get; set; }
+    public string? XAxisColumn { get; set; }
+    public string? YAxisColumn { get; set; }
+    public string? XAxisOriginalColumn { get; set; }
+    public string? YAxisOriginalColumn { get; set; }
+}
+
+
+
 

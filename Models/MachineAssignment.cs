@@ -10,6 +10,7 @@ public class MachineAssignment
     public DateTime? DeliveryDate { get; set; }
     public string? Designer { get; set; }
     public string? TeamLeader { get; set; }
+    public int? File_ID { get; set; } // Foreign key to Files.Id
     public string? FilePath { get; set; }
     public int Status { get; set; } = 1; // 1: new, 2: đang xử lý, 3: hoàn thành
 

@@ -147,53 +147,60 @@ public class FilesController : ControllerBase
             filePath = file.FilePath;
             var assignmentId = file.AssignmentID;
 
-            // If file has AssignmentID, update that specific assignment
+            // If file has AssignmentID, update File_ID if this was the primary file
             if (assignmentId.HasValue)
             {
                 var assignment = await _context.MachineAssignments.FindAsync(assignmentId.Value);
-                if (assignment != null && !string.IsNullOrWhiteSpace(assignment.FilePath))
+                if (assignment != null && assignment.File_ID == file.Id)
                 {
-                    var filePaths = assignment.FilePath.Split(';', StringSplitOptions.RemoveEmptyEntries)
-                        .Where(fp => fp.Trim() != filePath.Trim())
-                        .ToList();
-
-                    if (filePaths.Any())
+                    // If this was the primary file (File_ID), find the next file for this assignment
+                    var nextFile = await _context.Files
+                        .Where(f => f.AssignmentID == assignmentId.Value && f.Id != file.Id)
+                        .OrderBy(f => f.UploadDate)
+                        .FirstOrDefaultAsync();
+                    
+                    if (nextFile != null)
                     {
-                        assignment.FilePath = string.Join(";", filePaths);
+                        assignment.File_ID = nextFile.Id;
+                        _logger?.LogInformation("Updated File_ID to {FileId} after deleting primary file {DeletedFileId}", nextFile.Id, file.Id);
                     }
                     else
                     {
-                        assignment.FilePath = null;
+                        assignment.File_ID = null;
+                        _logger?.LogInformation("Cleared File_ID after deleting last file for AssignmentID {AssignmentID}", assignmentId.Value);
                     }
                 }
-            }
-            else
-            {
-                // Fallback: Find all MachineAssignments that contain this filePath (for backward compatibility)
-                var assignments = await _context.MachineAssignments
-                    .Where(a => a.FilePath != null && a.FilePath.Contains(filePath))
+
+                // Update File_ID for WorkItems that reference this file
+                var workItemsWithThisFile = await _context.WorkItems
+                    .Where(wi => wi.AssignmentID == assignmentId.Value && wi.File_ID == file.Id)
                     .ToListAsync();
-
-                // Remove filePath from each assignment's FilePath
-                foreach (var assignment in assignments)
+                
+                if (workItemsWithThisFile.Any())
                 {
-                    if (!string.IsNullOrWhiteSpace(assignment.FilePath))
+                    // Find the next file for this assignment to replace the deleted file
+                    var nextFileForWorkItems = await _context.Files
+                        .Where(f => f.AssignmentID == assignmentId.Value && f.Id != file.Id)
+                        .OrderBy(f => f.UploadDate)
+                        .FirstOrDefaultAsync();
+                    
+                    foreach (var workItem in workItemsWithThisFile)
                     {
-                        var filePaths = assignment.FilePath.Split(';', StringSplitOptions.RemoveEmptyEntries)
-                            .Where(fp => fp.Trim() != filePath.Trim())
-                            .ToList();
-
-                        if (filePaths.Any())
+                        if (nextFileForWorkItems != null)
                         {
-                            assignment.FilePath = string.Join(";", filePaths);
+                            workItem.File_ID = nextFileForWorkItems.Id;
                         }
                         else
                         {
-                            assignment.FilePath = null;
+                            workItem.File_ID = null;
                         }
                     }
+                    _logger?.LogInformation("Updated File_ID for {Count} WorkItems after deleting file {FileId}", 
+                        workItemsWithThisFile.Count, file.Id);
                 }
             }
+            
+            // Note: We no longer update FilePath in MachineAssignment since files are tracked in Files table via AssignmentID
 
             // Remove file record from database FIRST
             _context.Files.Remove(file);
@@ -371,28 +378,35 @@ public class FilesController : ControllerBase
                     Description = description
                 };
 
-                // Update MachineAssignment.FilePath - append new filePath with semicolon separator
-                if (string.IsNullOrWhiteSpace(assignment.FilePath))
+                // Save file first to get its Id
+                _context.Files.Add(fileItem);
+                await _context.SaveChangesAsync();
+
+                // Update MachineAssignment.File_ID with the uploaded file's Id
+                // If this is the first file or File_ID is null, set it to this file's Id
+                // Note: We no longer update FilePath in MachineAssignment since files are tracked in Files table via AssignmentID
+                if (!assignment.File_ID.HasValue)
                 {
-                    assignment.FilePath = filePath;
-                }
-                else
-                {
-                    // Check if filePath length would exceed max length (4000 chars)
-                    var newFilePath = $"{assignment.FilePath};{filePath}";
-                    if (newFilePath.Length > 4000)
-                    {
-                        _logger?.LogWarning("FilePath would exceed max length. Truncating or skipping assignment update.");
-                        // Don't update assignment, just save file
-                    }
-                    else
-                    {
-                        assignment.FilePath = newFilePath;
-                    }
+                    assignment.File_ID = fileItem.Id;
+                    _logger?.LogInformation("Setting File_ID to {FileId} for AssignmentID {AssignmentID}", fileItem.Id, assignmentId);
                 }
 
-                // Save both changes in a single transaction
-                _context.Files.Add(fileItem);
+                // Update File_ID for all WorkItems of this assignment that don't have File_ID yet
+                var workItemsWithoutFile = await _context.WorkItems
+                    .Where(wi => wi.AssignmentID == assignmentId && !wi.File_ID.HasValue)
+                    .ToListAsync();
+                
+                if (workItemsWithoutFile.Any())
+                {
+                    foreach (var workItem in workItemsWithoutFile)
+                    {
+                        workItem.File_ID = fileItem.Id;
+                    }
+                    _logger?.LogInformation("Setting File_ID to {FileId} for {Count} WorkItems of AssignmentID {AssignmentID}", 
+                        fileItem.Id, workItemsWithoutFile.Count, assignmentId);
+                }
+                
+                // Save all changes (assignment and work items)
                 await _context.SaveChangesAsync();
                 
                 // Commit transaction if everything succeeds

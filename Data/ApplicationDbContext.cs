@@ -189,6 +189,9 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.AdditionalRequest).HasMaxLength(1000);
             entity.Property(e => e.Designer).HasMaxLength(100);
             entity.Property(e => e.TeamLeader).HasMaxLength(100);
+            entity.Property(e => e.File_ID)
+                .HasColumnName("File_ID")
+                .HasColumnType("int");
             entity.Property(e => e.FilePath).HasMaxLength(4000); // Increased to support multiple file paths separated by semicolon
             entity.Property(e => e.Status)
                 .IsRequired()
@@ -261,11 +264,22 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.WorkType).HasMaxLength(100);
             entity.Property(e => e.PersonName).HasMaxLength(100);
             entity.Property(e => e.Notes).HasMaxLength(500);
+            entity.Property(e => e.File_ID)
+                .HasColumnName("File_ID")
+                .HasColumnType("int");
             
-            // PersonConfirmation - should be bit in database
-            // If database still has nvarchar, run migration script to convert
+            // PersonConfirmation - convert between bool? (C#) and nvarchar (database)
+            // Database column is nvarchar(50) but model expects bool?
             entity.Property(e => e.PersonConfirmation)
-                .HasColumnType("bit"); // Change to bit after running migration
+                .HasConversion(
+                    // Convert bool? to string for database
+                    v => v.HasValue ? (v.Value ? "1" : "0") : null,
+                    // Convert string from database to bool?
+                    v => string.IsNullOrEmpty(v) 
+                        ? (bool?)null 
+                        : (v.Trim().ToLower() == "1" || v.Trim().ToLower() == "true" || v.Trim().ToLower() == "yes" || v.Trim() == "1"))
+                .HasColumnType("nvarchar(50)")
+                .IsRequired(false);
             
             entity.HasOne(e => e.MachineAssignment)
                   .WithMany(ma => ma.WorkItems)

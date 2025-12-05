@@ -176,6 +176,8 @@ public class WorkItemsController : ControllerBase
     [Consumes("application/json")]
     public async Task<IActionResult> UpdateWorkItem(int id, [FromBody] UpdateWorkItemDto? dto)
     {
+        // Use transaction to ensure atomicity
+        using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
             _logger?.LogInformation("UpdateWorkItem called with ID: {WorkItemID}, DTO: {@Dto}", id, dto);
@@ -184,197 +186,92 @@ public class WorkItemsController : ControllerBase
             if (dto == null)
             {
                 _logger?.LogWarning("UpdateWorkItem: DTO is null for ID {WorkItemID}", id);
+                await transaction.RollbackAsync();
                 return BadRequest(new { error = "Request body is required" });
             }
             
-            // Kiểm tra xem có work item nào trong database không
-            var totalCount = await _context.WorkItems.CountAsync();
-            _logger?.LogInformation("Total work items in database: {Count}", totalCount);
+            // Get work item from database
+            var workItem = await _context.WorkItems
+                .FirstOrDefaultAsync(wi => wi.WorkItemID == id);
             
-            // Lấy tất cả work item IDs để debug
-            var allIds = await _context.WorkItems.Select(wi => wi.WorkItemID).ToListAsync();
-            _logger?.LogInformation("All work item IDs in database: {@Ids}", allIds);
-            
-            // Query work item - select only fields we need to avoid PersonConfirmation cast error
-            // Use raw SQL to get PersonConfirmation as string, then convert
-            var workItemExists = await _context.Database.SqlQueryRaw<int>(
-                "SELECT COUNT(*) FROM WorkItem WHERE WorkItemID = {0}", id).FirstOrDefaultAsync();
-            
-            if (workItemExists == 0)
+            if (workItem == null)
             {
-                _logger?.LogWarning("Work item with ID {WorkItemID} not found. Available IDs: {@Ids}", id, allIds);
-                return NotFound(new { error = "Work item not found", workItemID = id, availableIds = allIds });
-            }
-            
-            // Get work item using raw SQL to avoid PersonConfirmation cast error
-            // Select all fields except PersonConfirmation, then handle it separately
-            var workItemData = await _context.Database.SqlQueryRaw<WorkItemUpdateData>(
-                @"SELECT 
-                    WorkItemID,
-                    AssignmentID,
-                    WorkType,
-                    PersonName,
-                    StartDate,
-                    ExpectedFinish,
-                    ActualFinish,
-                    CAST(PersonConfirmation AS NVARCHAR(10)) AS PersonConfirmationRaw,
-                    Notes
-                  FROM WorkItem
-                  WHERE WorkItemID = {0}",
-                id).FirstOrDefaultAsync();
-            
-            if (workItemData == null)
-            {
-                _logger?.LogWarning("Work item data not found for ID {WorkItemID}", id);
+                _logger?.LogWarning("Work item with ID {WorkItemID} not found", id);
+                await transaction.RollbackAsync();
                 return NotFound(new { error = "Work item not found", workItemID = id });
             }
             
-            _logger?.LogInformation("Query result for ID {WorkItemID}: Found", id);
+            _logger?.LogInformation("Found work item {WorkItemID} for update", id);
 
-            // Use transaction to ensure atomicity
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
+            // Update only provided fields
+            if (dto.WorkType != null)
             {
-                // Build UPDATE SQL dynamically based on provided fields
-                var updateFields = new List<string>();
-                var parameters = new List<object>();
-                int paramIndex = 0;
-
-                if (dto.WorkType != null)
-                {
-                    updateFields.Add($"WorkType = {{{paramIndex}}}");
-                    parameters.Add(dto.WorkType);
-                    paramIndex++;
-                }
-
-                if (dto.PersonName != null)
-                {
-                    updateFields.Add($"PersonName = {{{paramIndex}}}");
-                    parameters.Add(dto.PersonName);
-                    paramIndex++;
-                }
-
-                if (dto.StartDate.HasValue)
-                {
-                    updateFields.Add($"StartDate = {{{paramIndex}}}");
-                    parameters.Add(dto.StartDate.Value);
-                    paramIndex++;
-                }
-
-                if (dto.ExpectedFinish.HasValue)
-                {
-                    updateFields.Add($"ExpectedFinish = {{{paramIndex}}}");
-                    parameters.Add(dto.ExpectedFinish.Value);
-                    paramIndex++;
-                }
-
-                if (dto.ActualFinish.HasValue)
-                {
-                    updateFields.Add($"ActualFinish = {{{paramIndex}}}");
-                    parameters.Add(dto.ActualFinish.Value);
-                    paramIndex++;
-                }
-
-                if (dto.PersonConfirmation.HasValue)
-                {
-                    updateFields.Add($"PersonConfirmation = {{{paramIndex}}}");
-                    parameters.Add(dto.PersonConfirmation.Value ? 1 : 0);
-                    paramIndex++;
-                }
-
-                if (dto.Notes != null)
-                {
-                    updateFields.Add($"Notes = {{{paramIndex}}}");
-                    parameters.Add(dto.Notes);
-                    paramIndex++;
-                }
-
-                if (updateFields.Count > 0)
-                {
-                    // Add WorkItemID parameter
-                    parameters.Add(id);
-                    
-                    var updateSql = $"UPDATE WorkItem SET {string.Join(", ", updateFields)} WHERE WorkItemID = {{{paramIndex}}}";
-                    await _context.Database.ExecuteSqlRawAsync(updateSql, parameters.ToArray());
-                    _logger?.LogInformation("Updated {FieldCount} fields for WorkItem {WorkItemID}", updateFields.Count, id);
-                }
-                else
-                {
-                    _logger?.LogWarning("No fields to update for WorkItem {WorkItemID}", id);
-                }
-
-                await transaction.CommitAsync();
-                _logger?.LogInformation("Successfully updated work item {WorkItemID}", id);
-            }
-            catch (DbUpdateException dbEx)
-            {
-                await transaction.RollbackAsync();
-                _logger?.LogError(dbEx, "Database error updating work item {WorkItemID}: {Message}", id, dbEx.Message);
-                return StatusCode(500, new { error = "Error updating work item", message = dbEx.InnerException?.Message ?? dbEx.Message });
-            }
-            catch (Exception saveEx)
-            {
-                await transaction.RollbackAsync();
-                _logger?.LogError(saveEx, "Error saving work item {WorkItemID}: {Message}", id, saveEx.Message);
-                return StatusCode(500, new { error = "Error updating work item", message = saveEx.Message });
+                workItem.WorkType = dto.WorkType;
             }
 
-            // Get updated work item data using raw SQL to avoid PersonConfirmation cast error
-            var updatedWorkItemData = await _context.Database.SqlQueryRaw<WorkItemUpdateData>(
-                @"SELECT 
-                    WorkItemID,
-                    AssignmentID,
-                    WorkType,
-                    PersonName,
-                    StartDate,
-                    ExpectedFinish,
-                    ActualFinish,
-                    CAST(PersonConfirmation AS NVARCHAR(10)) AS PersonConfirmationRaw,
-                    Notes
-                  FROM WorkItem
-                  WHERE WorkItemID = {0}",
-                id).FirstOrDefaultAsync();
-
-            if (updatedWorkItemData == null)
+            if (dto.PersonName != null)
             {
-                _logger?.LogWarning("Could not retrieve updated work item data for ID {WorkItemID}", id);
-                return StatusCode(500, new { error = "Error retrieving updated work item" });
+                workItem.PersonName = dto.PersonName;
             }
 
-            // Convert PersonConfirmation from string to bool
-            bool? personConfirmation = null;
-            if (!string.IsNullOrWhiteSpace(updatedWorkItemData.PersonConfirmationRaw))
+            if (dto.StartDate.HasValue)
             {
-                var trimmed = updatedWorkItemData.PersonConfirmationRaw.Trim();
-                if (bool.TryParse(trimmed, out bool boolValue))
-                    personConfirmation = boolValue;
-                else if (trimmed.Equals("1", StringComparison.OrdinalIgnoreCase) || 
-                         trimmed.Equals("true", StringComparison.OrdinalIgnoreCase))
-                    personConfirmation = true;
-                else if (trimmed.Equals("0", StringComparison.OrdinalIgnoreCase) || 
-                         trimmed.Equals("false", StringComparison.OrdinalIgnoreCase))
-                    personConfirmation = false;
+                workItem.StartDate = dto.StartDate.Value;
             }
 
+            if (dto.ExpectedFinish.HasValue)
+            {
+                workItem.ExpectedFinish = dto.ExpectedFinish.Value;
+            }
+
+            if (dto.ActualFinish.HasValue)
+            {
+                workItem.ActualFinish = dto.ActualFinish.Value;
+            }
+
+            if (dto.PersonConfirmation.HasValue)
+            {
+                workItem.PersonConfirmation = dto.PersonConfirmation.Value;
+            }
+
+            if (dto.Notes != null)
+            {
+                workItem.Notes = dto.Notes;
+            }
+
+            // Save changes
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+            
+            _logger?.LogInformation("Successfully updated work item {WorkItemID}", id);
+
+            // Return updated work item
             var workItemDto = new WorkItemDto
             {
-                WorkItemID = updatedWorkItemData.WorkItemID,
-                AssignmentID = updatedWorkItemData.AssignmentID,
-                WorkType = updatedWorkItemData.WorkType,
-                PersonName = updatedWorkItemData.PersonName,
-                StartDate = updatedWorkItemData.StartDate,
-                ExpectedFinish = updatedWorkItemData.ExpectedFinish,
-                ActualFinish = updatedWorkItemData.ActualFinish,
-                PersonConfirmation = personConfirmation,
-                Notes = updatedWorkItemData.Notes
+                WorkItemID = workItem.WorkItemID,
+                AssignmentID = workItem.AssignmentID,
+                WorkType = workItem.WorkType,
+                PersonName = workItem.PersonName,
+                StartDate = workItem.StartDate,
+                ExpectedFinish = workItem.ExpectedFinish,
+                ActualFinish = workItem.ActualFinish,
+                PersonConfirmation = workItem.PersonConfirmation,
+                Notes = workItem.Notes
             };
 
             return Ok(workItemDto);
         }
+        catch (DbUpdateException dbEx)
+        {
+            await transaction.RollbackAsync();
+            _logger?.LogError(dbEx, "Database error updating work item {WorkItemID}: {Message}", id, dbEx.Message);
+            return StatusCode(500, new { error = "Error updating work item", message = dbEx.InnerException?.Message ?? dbEx.Message, details = dbEx.ToString() });
+        }
         catch (Exception ex)
         {
+            await transaction.RollbackAsync();
             _logger?.LogError(ex, "Error in UpdateWorkItem: {Message}", ex.Message);
-            return StatusCode(500, new { error = "Error updating work item", message = ex.Message });
+            return StatusCode(500, new { error = "Error updating work item", message = ex.Message, details = ex.ToString() });
         }
     }
 
@@ -415,19 +312,5 @@ public class WorkItemsController : ControllerBase
             return StatusCode(500, new { error = "Error deleting work item", message = ex.Message });
         }
     }
-}
-
-// Helper class for raw SQL query result to handle PersonConfirmation type conversion
-internal class WorkItemUpdateData
-{
-    public int WorkItemID { get; set; }
-    public int AssignmentID { get; set; }
-    public string? WorkType { get; set; }
-    public string? PersonName { get; set; }
-    public DateTime? StartDate { get; set; }
-    public DateTime? ExpectedFinish { get; set; }
-    public DateTime? ActualFinish { get; set; }
-    public string? PersonConfirmationRaw { get; set; }
-    public string? Notes { get; set; }
 }
 

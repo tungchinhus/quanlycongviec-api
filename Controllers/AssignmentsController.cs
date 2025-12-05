@@ -531,7 +531,8 @@ public class AssignmentsController : ControllerBase
                 ExpectedFinish = dto.ExpectedFinish,
                 ActualFinish = dto.ActualFinish,
                 PersonConfirmation = dto.PersonConfirmation,
-                Notes = dto.Notes
+                Notes = dto.Notes,
+                File_ID = assignment.File_ID // Set File_ID from assignment if available
             };
 
             _context.WorkItems.Add(workItem);

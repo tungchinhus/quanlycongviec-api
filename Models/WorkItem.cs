@@ -11,6 +11,7 @@ public class WorkItem
     public DateTime? ActualFinish { get; set; }
     public bool? PersonConfirmation { get; set; }
     public string? Notes { get; set; }
+    public int? File_ID { get; set; } // Foreign key to Files.Id
 
     // Navigation property
     public MachineAssignment? MachineAssignment { get; set; }

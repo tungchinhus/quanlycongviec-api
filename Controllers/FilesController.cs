@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.IO;
+using System.Security.Claims;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
 using quanlyfilesBE.Data;
@@ -26,6 +27,50 @@ public class FilesController : ControllerBase
         _context = context;
         _fileStorageOptions = fileStorageOptions.Value;
         _logger = logger;
+    }
+
+    // Helper methods to handle File_ID as comma-separated string
+    private List<int> ParseFileIds(string? fileIds)
+    {
+        if (string.IsNullOrWhiteSpace(fileIds))
+            return new List<int>();
+        
+        return fileIds.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(id => int.TryParse(id.Trim(), out var parsedId) ? parsedId : (int?)null)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .ToList();
+    }
+
+    private string JoinFileIds(List<int> fileIds)
+    {
+        return string.Join(",", fileIds);
+    }
+
+    private bool ContainsFileId(string? fileIds, int fileId)
+    {
+        if (string.IsNullOrWhiteSpace(fileIds))
+            return false;
+        
+        var ids = ParseFileIds(fileIds);
+        return ids.Contains(fileId);
+    }
+
+    private string AddFileId(string? fileIds, int fileId)
+    {
+        var ids = ParseFileIds(fileIds);
+        if (!ids.Contains(fileId))
+        {
+            ids.Add(fileId);
+        }
+        return JoinFileIds(ids);
+    }
+
+    private string RemoveFileId(string? fileIds, int fileId)
+    {
+        var ids = ParseFileIds(fileIds);
+        ids.Remove(fileId);
+        return ids.Any() ? JoinFileIds(ids) : null;
     }
 
     // GET: api/Files
@@ -172,31 +217,24 @@ public class FilesController : ControllerBase
                 }
 
                 // Update File_ID for WorkItems that reference this file
-                var workItemsWithThisFile = await _context.WorkItems
-                    .Where(wi => wi.AssignmentID == assignmentId.Value && wi.File_ID == file.Id)
+                // File_ID is now a comma-separated string, so we need to check if it contains the file ID
+                var allWorkItems = await _context.WorkItems
+                    .Where(wi => wi.AssignmentID == assignmentId.Value)
                     .ToListAsync();
+                
+                var workItemsWithThisFile = allWorkItems
+                    .Where(wi => ContainsFileId(wi.File_ID, file.Id))
+                    .ToList();
                 
                 if (workItemsWithThisFile.Any())
                 {
-                    // Find the next file for this assignment to replace the deleted file
-                    var nextFileForWorkItems = await _context.Files
-                        .Where(f => f.AssignmentID == assignmentId.Value && f.Id != file.Id)
-                        .OrderBy(f => f.UploadDate)
-                        .FirstOrDefaultAsync();
-                    
+                    // Remove the deleted file ID from File_ID string
                     foreach (var workItem in workItemsWithThisFile)
                     {
-                        if (nextFileForWorkItems != null)
-                        {
-                            workItem.File_ID = nextFileForWorkItems.Id;
-                        }
-                        else
-                        {
-                            workItem.File_ID = null;
-                        }
+                        workItem.File_ID = RemoveFileId(workItem.File_ID, file.Id);
                     }
-                    _logger?.LogInformation("Updated File_ID for {Count} WorkItems after deleting file {FileId}", 
-                        workItemsWithThisFile.Count, file.Id);
+                    _logger?.LogInformation("Removed file ID {FileId} from File_ID for {Count} WorkItems", 
+                        file.Id, workItemsWithThisFile.Count);
                 }
             }
             
@@ -391,19 +429,62 @@ public class FilesController : ControllerBase
                     _logger?.LogInformation("Setting File_ID to {FileId} for AssignmentID {AssignmentID}", fileItem.Id, assignmentId);
                 }
 
-                // Update File_ID for all WorkItems of this assignment that don't have File_ID yet
-                var workItemsWithoutFile = await _context.WorkItems
-                    .Where(wi => wi.AssignmentID == assignmentId && !wi.File_ID.HasValue)
+                // Update File_ID only for WorkItems that belong to the current user
+                // Get current user info from claims
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+                    ?? User.FindFirst("sub")?.Value;
+                var currentUserName = User.Identity?.Name;
+                
+                // Try to get user from database to match with WorkItem.PersonName
+                User? currentUser = null;
+                if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out int userId))
+                {
+                    currentUser = await _context.Users.FindAsync(userId);
+                }
+                
+                // Get all possible identifiers for current user
+                var userIdentifiers = new List<string>();
+                if (currentUser != null)
+                {
+                    userIdentifiers.Add(currentUser.UserId.ToString());
+                    if (!string.IsNullOrEmpty(currentUser.UserName))
+                        userIdentifiers.Add(currentUser.UserName);
+                    if (!string.IsNullOrEmpty(currentUser.FullName))
+                        userIdentifiers.Add(currentUser.FullName);
+                }
+                if (!string.IsNullOrEmpty(currentUserName))
+                    userIdentifiers.Add(currentUserName);
+                if (!string.IsNullOrEmpty(userIdClaim))
+                    userIdentifiers.Add(userIdClaim);
+                
+                // Find WorkItems that belong to current user
+                var workItems = await _context.WorkItems
+                    .Where(wi => wi.AssignmentID == assignmentId)
                     .ToListAsync();
                 
-                if (workItemsWithoutFile.Any())
+                var userWorkItems = workItems
+                    .Where(wi => !string.IsNullOrEmpty(wi.PersonName) && 
+                                 userIdentifiers.Any(id => 
+                                     wi.PersonName.Equals(id, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+                
+                if (userWorkItems.Any())
                 {
-                    foreach (var workItem in workItemsWithoutFile)
+                    foreach (var workItem in userWorkItems)
                     {
-                        workItem.File_ID = fileItem.Id;
+                        // Add file ID to File_ID string if not already present
+                        if (!ContainsFileId(workItem.File_ID, fileItem.Id))
+                        {
+                            workItem.File_ID = AddFileId(workItem.File_ID, fileItem.Id);
+                        }
                     }
-                    _logger?.LogInformation("Setting File_ID to {FileId} for {Count} WorkItems of AssignmentID {AssignmentID}", 
-                        fileItem.Id, workItemsWithoutFile.Count, assignmentId);
+                    _logger?.LogInformation("Added file ID {FileId} to File_ID for {Count} WorkItems of current user (AssignmentID {AssignmentID})", 
+                        fileItem.Id, userWorkItems.Count, assignmentId);
+                }
+                else
+                {
+                    _logger?.LogInformation("No matching WorkItems found for current user (AssignmentID {AssignmentID}, UserIdentifiers: {UserIdentifiers})", 
+                        assignmentId, string.Join(", ", userIdentifiers));
                 }
                 
                 // Save all changes (assignment and work items)

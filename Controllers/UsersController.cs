@@ -995,6 +995,32 @@ public class UsersController : ControllerBase
         return Ok(userDto);
     }
 
+    // GET: api/users/by-username/{username}
+    // Tìm user theo username hoặc email và trả về email để đăng nhập Firebase
+    [HttpGet("by-username/{usernameOrEmail}")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetUserByUsernameOrEmail(string usernameOrEmail)
+    {
+        if (string.IsNullOrEmpty(usernameOrEmail))
+            return BadRequest("Username or email is required");
+
+        // Tìm user theo username hoặc email (case-insensitive)
+        var user = await _db.Users
+            .FirstOrDefaultAsync(u => 
+                u.UserName.ToLower() == usernameOrEmail.ToLower() || 
+                (u.Email != null && u.Email.ToLower() == usernameOrEmail.ToLower()));
+
+        if (user == null)
+            return NotFound(new { message = "Tên đăng nhập hoặc email không tồn tại." });
+
+        // Trả về email để frontend sử dụng đăng nhập Firebase
+        // Nếu user không có email, trả về lỗi
+        if (string.IsNullOrEmpty(user.Email))
+            return BadRequest(new { message = "User không có email. Không thể đăng nhập." });
+
+        return Ok(new { email = user.Email });
+    }
+
     // GET: api/users/check-custom-claims/{firebaseUid}
     // Kiểm tra custom claims của một user trên Firebase
     [HttpGet("check-custom-claims/{firebaseUid}")]

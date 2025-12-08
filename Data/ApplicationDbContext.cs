@@ -266,7 +266,8 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.Notes).HasMaxLength(500);
             entity.Property(e => e.File_ID)
                 .HasColumnName("File_ID")
-                .HasColumnType("int");
+                .HasColumnType("nvarchar")
+                .HasMaxLength(500); // Allow storing multiple file IDs separated by commas
             
             // PersonConfirmation - convert between bool? (C#) and nvarchar (database)
             // Database column is nvarchar(50) but model expects bool?

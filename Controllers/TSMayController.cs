@@ -124,75 +124,80 @@ public class TSMayController : ControllerBase
             var created = new List<TSMay>();
             var errors = new List<BulkCreateErrorDto>();
 
-            // Use transaction for bulk insert - all or nothing
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
+            // Use execution strategy to support retries with transaction
+            var strategy = _context.Database.CreateExecutionStrategy();
+            
+            await strategy.ExecuteAsync(async () =>
             {
-                for (int i = 0; i < dto.Items.Count; i++)
+                await using var transaction = await _context.Database.BeginTransactionAsync();
+                try
                 {
-                    try
+                    for (int i = 0; i < dto.Items.Count; i++)
                     {
-                        var itemDto = dto.Items[i];
-                        var newItem = new TSMay
+                        try
                         {
-                            CongSuat = itemDto.CongSuat,
-                            SoMay = itemDto.SoMay,
-                            SBB = itemDto.SBB,
-                            LSX = itemDto.LSX,
-                            TChuanLSX = itemDto.TChuanLSX,
-                            TBKT = itemDto.TBKT,
-                            Po = itemDto.Po,
-                            Io = itemDto.Io,
-                            Pk75H1 = itemDto.Pk75H1,
-                            Pk75H2 = itemDto.Pk75H2,
-                            Uk75H1 = itemDto.Uk75H1,
-                            Uk75H2 = itemDto.Uk75H2,
-                            UdmHVH1 = itemDto.UdmHVH1,
-                            UdmHVH2 = itemDto.UdmHVH2,
-                            UdmLV = itemDto.UdmLV,
-                            Phase = itemDto.Phase
-                        };
+                            var itemDto = dto.Items[i];
+                            var newItem = new TSMay
+                            {
+                                CongSuat = itemDto.CongSuat,
+                                SoMay = itemDto.SoMay,
+                                SBB = itemDto.SBB,
+                                LSX = itemDto.LSX,
+                                TChuanLSX = itemDto.TChuanLSX,
+                                TBKT = itemDto.TBKT,
+                                Po = itemDto.Po,
+                                Io = itemDto.Io,
+                                Pk75H1 = itemDto.Pk75H1,
+                                Pk75H2 = itemDto.Pk75H2,
+                                Uk75H1 = itemDto.Uk75H1,
+                                Uk75H2 = itemDto.Uk75H2,
+                                UdmHVH1 = itemDto.UdmHVH1,
+                                UdmHVH2 = itemDto.UdmHVH2,
+                                UdmLV = itemDto.UdmLV,
+                                Phase = itemDto.Phase
+                            };
 
-                        _context.TSMay.Add(newItem);
-                        await _context.SaveChangesAsync();
-                        created.Add(newItem);
-                    }
-                    catch (DbUpdateException dbEx)
-                    {
-                        errors.Add(new BulkCreateErrorDto
+                            _context.TSMay.Add(newItem);
+                            await _context.SaveChangesAsync();
+                            created.Add(newItem);
+                        }
+                        catch (DbUpdateException dbEx)
                         {
-                            Index = i,
-                            Data = dto.Items[i],
-                            Error = dbEx.InnerException?.Message ?? dbEx.Message
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        errors.Add(new BulkCreateErrorDto
+                            errors.Add(new BulkCreateErrorDto
+                            {
+                                Index = i,
+                                Data = dto.Items[i],
+                                Error = dbEx.InnerException?.Message ?? dbEx.Message
+                            });
+                        }
+                        catch (Exception ex)
                         {
-                            Index = i,
-                            Data = dto.Items[i],
-                            Error = ex.Message
-                        });
+                            errors.Add(new BulkCreateErrorDto
+                            {
+                                Index = i,
+                                Data = dto.Items[i],
+                                Error = ex.Message
+                            });
+                        }
+                    }
+
+                    if (errors.Count == 0)
+                    {
+                        await transaction.CommitAsync();
+                    }
+                    else
+                    {
+                        await transaction.RollbackAsync();
+                        created.Clear();
                     }
                 }
-
-                if (errors.Count == 0)
-                {
-                    await transaction.CommitAsync();
-                }
-                else
+                catch (Exception ex)
                 {
                     await transaction.RollbackAsync();
-                    created.Clear();
+                    _logger?.LogError(ex, "Error in bulk create transaction");
+                    throw;
                 }
-            }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                _logger?.LogError(ex, "Error in bulk create transaction");
-                throw;
-            }
+            });
 
             var response = new BulkCreateTSMayResponseDto
             {

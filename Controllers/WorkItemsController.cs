@@ -114,33 +114,60 @@ public class WorkItemsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<WorkItemDto>> CreateWorkItem([FromBody] CreateWorkItemDto dto)
     {
-        // Use transaction to ensure atomicity
-        using var transaction = await _context.Database.BeginTransactionAsync();
+        // Use execution strategy to support retries with transaction
+        WorkItem? workItem = null;
+        var strategy = _context.Database.CreateExecutionStrategy();
+        
         try
         {
-            // Validate assignment exists
-            var assignment = await _context.MachineAssignments.FindAsync(dto.AssignmentID);
-            if (assignment == null)
+            await strategy.ExecuteAsync(async () =>
             {
-                await transaction.RollbackAsync();
+                await using var transaction = await _context.Database.BeginTransactionAsync();
+                try
+                {
+                    // Validate assignment exists
+                    var assignment = await _context.MachineAssignments.FindAsync(dto.AssignmentID);
+                    if (assignment == null)
+                    {
+                        await transaction.RollbackAsync();
+                        return;
+                    }
+
+                    workItem = new WorkItem
+                    {
+                        AssignmentID = dto.AssignmentID,
+                        WorkType = dto.WorkType,
+                        PersonName = dto.PersonName,
+                        StartDate = dto.StartDate,
+                        ExpectedFinish = dto.ExpectedFinish,
+                        ActualFinish = dto.ActualFinish,
+                        PersonConfirmation = dto.PersonConfirmation,
+                        Notes = dto.Notes
+                    };
+
+                    _context.WorkItems.Add(workItem);
+                    await _context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                }
+                catch (DbUpdateException dbEx)
+                {
+                    await transaction.RollbackAsync();
+                    _logger?.LogError(dbEx, "Database error creating work item: {Message}", dbEx.Message);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger?.LogError(ex, "Error in CreateWorkItem transaction: {Message}", ex.Message);
+                    throw;
+                }
+            });
+
+            // Check if assignment was found
+            if (workItem == null)
+            {
                 return NotFound(new { error = "Assignment not found" });
             }
-
-            var workItem = new WorkItem
-            {
-                AssignmentID = dto.AssignmentID,
-                WorkType = dto.WorkType,
-                PersonName = dto.PersonName,
-                StartDate = dto.StartDate,
-                ExpectedFinish = dto.ExpectedFinish,
-                ActualFinish = dto.ActualFinish,
-                PersonConfirmation = dto.PersonConfirmation,
-                Notes = dto.Notes
-            };
-
-            _context.WorkItems.Add(workItem);
-            await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
 
             var workItemDto = new WorkItemDto
             {
@@ -159,13 +186,11 @@ public class WorkItemsController : ControllerBase
         }
         catch (DbUpdateException dbEx)
         {
-            await transaction.RollbackAsync();
             _logger?.LogError(dbEx, "Database error creating work item: {Message}", dbEx.Message);
             return StatusCode(500, new { error = "Error creating work item", message = dbEx.InnerException?.Message ?? dbEx.Message });
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync();
             _logger?.LogError(ex, "Error in CreateWorkItem: {Message}", ex.Message);
             return StatusCode(500, new { error = "Error creating work item", message = ex.Message });
         }
@@ -176,74 +201,99 @@ public class WorkItemsController : ControllerBase
     [Consumes("application/json")]
     public async Task<IActionResult> UpdateWorkItem(int id, [FromBody] UpdateWorkItemDto? dto)
     {
-        // Use transaction to ensure atomicity
-        using var transaction = await _context.Database.BeginTransactionAsync();
+        _logger?.LogInformation("UpdateWorkItem called with ID: {WorkItemID}, DTO: {@Dto}", id, dto);
+        
+        // Validate DTO
+        if (dto == null)
+        {
+            _logger?.LogWarning("UpdateWorkItem: DTO is null for ID {WorkItemID}", id);
+            return BadRequest(new { error = "Request body is required" });
+        }
+
+        // Use execution strategy to support retries with transaction
+        WorkItem? workItem = null;
+        var strategy = _context.Database.CreateExecutionStrategy();
+        
         try
         {
-            _logger?.LogInformation("UpdateWorkItem called with ID: {WorkItemID}, DTO: {@Dto}", id, dto);
-            
-            // Validate DTO
-            if (dto == null)
+            await strategy.ExecuteAsync(async () =>
             {
-                _logger?.LogWarning("UpdateWorkItem: DTO is null for ID {WorkItemID}", id);
-                await transaction.RollbackAsync();
-                return BadRequest(new { error = "Request body is required" });
-            }
-            
-            // Get work item from database
-            var workItem = await _context.WorkItems
-                .FirstOrDefaultAsync(wi => wi.WorkItemID == id);
-            
+                await using var transaction = await _context.Database.BeginTransactionAsync();
+                try
+                {
+                    // Get work item from database
+                    workItem = await _context.WorkItems
+                        .FirstOrDefaultAsync(wi => wi.WorkItemID == id);
+                    
+                    if (workItem == null)
+                    {
+                        await transaction.RollbackAsync();
+                        return;
+                    }
+                    
+                    _logger?.LogInformation("Found work item {WorkItemID} for update", id);
+
+                    // Update only provided fields
+                    if (dto.WorkType != null)
+                    {
+                        workItem.WorkType = dto.WorkType;
+                    }
+
+                    if (dto.PersonName != null)
+                    {
+                        workItem.PersonName = dto.PersonName;
+                    }
+
+                    if (dto.StartDate.HasValue)
+                    {
+                        workItem.StartDate = dto.StartDate.Value;
+                    }
+
+                    if (dto.ExpectedFinish.HasValue)
+                    {
+                        workItem.ExpectedFinish = dto.ExpectedFinish.Value;
+                    }
+
+                    if (dto.ActualFinish.HasValue)
+                    {
+                        workItem.ActualFinish = dto.ActualFinish.Value;
+                    }
+
+                    if (dto.PersonConfirmation.HasValue)
+                    {
+                        workItem.PersonConfirmation = dto.PersonConfirmation.Value;
+                    }
+
+                    if (dto.Notes != null)
+                    {
+                        workItem.Notes = dto.Notes;
+                    }
+
+                    // Save changes
+                    await _context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                    
+                    _logger?.LogInformation("Successfully updated work item {WorkItemID}", id);
+                }
+                catch (DbUpdateException dbEx)
+                {
+                    await transaction.RollbackAsync();
+                    _logger?.LogError(dbEx, "Database error updating work item {WorkItemID}: {Message}", id, dbEx.Message);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger?.LogError(ex, "Error in UpdateWorkItem transaction: {Message}", ex.Message);
+                    throw;
+                }
+            });
+
+            // Check if work item was found
             if (workItem == null)
             {
-                _logger?.LogWarning("Work item with ID {WorkItemID} not found", id);
-                await transaction.RollbackAsync();
                 return NotFound(new { error = "Work item not found", workItemID = id });
             }
-            
-            _logger?.LogInformation("Found work item {WorkItemID} for update", id);
-
-            // Update only provided fields
-            if (dto.WorkType != null)
-            {
-                workItem.WorkType = dto.WorkType;
-            }
-
-            if (dto.PersonName != null)
-            {
-                workItem.PersonName = dto.PersonName;
-            }
-
-            if (dto.StartDate.HasValue)
-            {
-                workItem.StartDate = dto.StartDate.Value;
-            }
-
-            if (dto.ExpectedFinish.HasValue)
-            {
-                workItem.ExpectedFinish = dto.ExpectedFinish.Value;
-            }
-
-            if (dto.ActualFinish.HasValue)
-            {
-                workItem.ActualFinish = dto.ActualFinish.Value;
-            }
-
-            if (dto.PersonConfirmation.HasValue)
-            {
-                workItem.PersonConfirmation = dto.PersonConfirmation.Value;
-            }
-
-            if (dto.Notes != null)
-            {
-                workItem.Notes = dto.Notes;
-            }
-
-            // Save changes
-            await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
-            
-            _logger?.LogInformation("Successfully updated work item {WorkItemID}", id);
 
             // Return updated work item
             var workItemDto = new WorkItemDto
@@ -263,13 +313,11 @@ public class WorkItemsController : ControllerBase
         }
         catch (DbUpdateException dbEx)
         {
-            await transaction.RollbackAsync();
             _logger?.LogError(dbEx, "Database error updating work item {WorkItemID}: {Message}", id, dbEx.Message);
             return StatusCode(500, new { error = "Error updating work item", message = dbEx.InnerException?.Message ?? dbEx.Message, details = dbEx.ToString() });
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync();
             _logger?.LogError(ex, "Error in UpdateWorkItem: {Message}", ex.Message);
             return StatusCode(500, new { error = "Error updating work item", message = ex.Message, details = ex.ToString() });
         }
@@ -279,35 +327,62 @@ public class WorkItemsController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteWorkItem(int id)
     {
-        // Use transaction to ensure atomicity
-        using var transaction = await _context.Database.BeginTransactionAsync();
+        // Check if work item exists first
+        var workItemExists = await _context.WorkItems
+            .AnyAsync(wi => wi.WorkItemID == id);
+        
+        if (!workItemExists)
+        {
+            return NotFound(new { error = "Work item not found", workItemID = id });
+        }
+
+        // Use execution strategy to support retries with transaction
+        var strategy = _context.Database.CreateExecutionStrategy();
+        
         try
         {
-            // Sử dụng FirstOrDefaultAsync thay vì FindAsync để đảm bảo query từ database
-            var workItem = await _context.WorkItems
-                .FirstOrDefaultAsync(wi => wi.WorkItemID == id);
-            
-            if (workItem == null)
+            await strategy.ExecuteAsync(async () =>
             {
-                await transaction.RollbackAsync();
-                return NotFound(new { error = "Work item not found", workItemID = id });
-            }
+                await using var transaction = await _context.Database.BeginTransactionAsync();
+                try
+                {
+                    // Sử dụng FirstOrDefaultAsync thay vì FindAsync để đảm bảo query từ database
+                    var workItem = await _context.WorkItems
+                        .FirstOrDefaultAsync(wi => wi.WorkItemID == id);
+                    
+                    if (workItem == null)
+                    {
+                        await transaction.RollbackAsync();
+                        return;
+                    }
 
-            _context.WorkItems.Remove(workItem);
-            await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
+                    _context.WorkItems.Remove(workItem);
+                    await _context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                }
+                catch (DbUpdateException dbEx)
+                {
+                    await transaction.RollbackAsync();
+                    _logger?.LogError(dbEx, "Database error deleting work item {WorkItemID}: {Message}", id, dbEx.Message);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger?.LogError(ex, "Error in DeleteWorkItem transaction: {Message}", ex.Message);
+                    throw;
+                }
+            });
 
             return NoContent();
         }
         catch (DbUpdateException dbEx)
         {
-            await transaction.RollbackAsync();
             _logger?.LogError(dbEx, "Database error deleting work item {WorkItemID}: {Message}", id, dbEx.Message);
             return StatusCode(500, new { error = "Error deleting work item", message = dbEx.InnerException?.Message ?? dbEx.Message });
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync();
             _logger?.LogError(ex, "Error in DeleteWorkItem: {Message}", ex.Message);
             return StatusCode(500, new { error = "Error deleting work item", message = ex.Message });
         }

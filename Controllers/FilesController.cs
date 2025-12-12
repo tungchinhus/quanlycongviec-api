@@ -177,73 +177,99 @@ public class FilesController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteFile(int id)
     {
-        // Use transaction to ensure atomicity
-        using var transaction = await _context.Database.BeginTransactionAsync();
-        string? filePath = null;
+        // Check if file exists first
+        var file = await _context.Files.FindAsync(id);
+        if (file == null)
+        {
+            return NotFound(new { message = "Không tìm thấy file để xóa" });
+        }
+
+        // Use execution strategy to support retries with transaction
+        string? filePath = file.FilePath;
+        var assignmentId = file.AssignmentID;
+        var strategy = _context.Database.CreateExecutionStrategy();
+        
         try
         {
-            var file = await _context.Files.FindAsync(id);
-            if (file == null)
+            await strategy.ExecuteAsync(async () =>
             {
-                await transaction.RollbackAsync();
-                return NotFound(new { message = "Không tìm thấy file để xóa" });
-            }
-
-            filePath = file.FilePath;
-            var assignmentId = file.AssignmentID;
-
-            // If file has AssignmentID, update File_ID if this was the primary file
-            if (assignmentId.HasValue)
-            {
-                var assignment = await _context.MachineAssignments.FindAsync(assignmentId.Value);
-                if (assignment != null && assignment.File_ID == file.Id)
+                await using var transaction = await _context.Database.BeginTransactionAsync();
+                try
                 {
-                    // If this was the primary file (File_ID), find the next file for this assignment
-                    var nextFile = await _context.Files
-                        .Where(f => f.AssignmentID == assignmentId.Value && f.Id != file.Id)
-                        .OrderBy(f => f.UploadDate)
-                        .FirstOrDefaultAsync();
+                    // Re-fetch file within transaction to ensure we have the latest data
+                    var fileInTransaction = await _context.Files.FindAsync(id);
+                    if (fileInTransaction == null)
+                    {
+                        await transaction.RollbackAsync();
+                        return;
+                    }
+
+                    // If file has AssignmentID, update File_ID if this was the primary file
+                    if (assignmentId.HasValue)
+                    {
+                        var assignment = await _context.MachineAssignments.FindAsync(assignmentId.Value);
+                        if (assignment != null && assignment.File_ID == fileInTransaction.Id)
+                        {
+                            // If this was the primary file (File_ID), find the next file for this assignment
+                            var nextFile = await _context.Files
+                                .Where(f => f.AssignmentID == assignmentId.Value && f.Id != fileInTransaction.Id)
+                                .OrderBy(f => f.UploadDate)
+                                .FirstOrDefaultAsync();
+                            
+                            if (nextFile != null)
+                            {
+                                assignment.File_ID = nextFile.Id;
+                                _logger?.LogInformation("Updated File_ID to {FileId} after deleting primary file {DeletedFileId}", nextFile.Id, fileInTransaction.Id);
+                            }
+                            else
+                            {
+                                assignment.File_ID = null;
+                                _logger?.LogInformation("Cleared File_ID after deleting last file for AssignmentID {AssignmentID}", assignmentId.Value);
+                            }
+                        }
+
+                        // Update File_ID for WorkItems that reference this file
+                        // File_ID is now a comma-separated string, so we need to check if it contains the file ID
+                        var allWorkItems = await _context.WorkItems
+                            .Where(wi => wi.AssignmentID == assignmentId.Value)
+                            .ToListAsync();
+                        
+                        var workItemsWithThisFile = allWorkItems
+                            .Where(wi => ContainsFileId(wi.File_ID, fileInTransaction.Id))
+                            .ToList();
+                        
+                        if (workItemsWithThisFile.Any())
+                        {
+                            // Remove the deleted file ID from File_ID string
+                            foreach (var workItem in workItemsWithThisFile)
+                            {
+                                workItem.File_ID = RemoveFileId(workItem.File_ID, fileInTransaction.Id);
+                            }
+                            _logger?.LogInformation("Removed file ID {FileId} from File_ID for {Count} WorkItems", 
+                                fileInTransaction.Id, workItemsWithThisFile.Count);
+                        }
+                    }
                     
-                    if (nextFile != null)
-                    {
-                        assignment.File_ID = nextFile.Id;
-                        _logger?.LogInformation("Updated File_ID to {FileId} after deleting primary file {DeletedFileId}", nextFile.Id, file.Id);
-                    }
-                    else
-                    {
-                        assignment.File_ID = null;
-                        _logger?.LogInformation("Cleared File_ID after deleting last file for AssignmentID {AssignmentID}", assignmentId.Value);
-                    }
-                }
+                    // Note: We no longer update FilePath in MachineAssignment since files are tracked in Files table via AssignmentID
 
-                // Update File_ID for WorkItems that reference this file
-                // File_ID is now a comma-separated string, so we need to check if it contains the file ID
-                var allWorkItems = await _context.WorkItems
-                    .Where(wi => wi.AssignmentID == assignmentId.Value)
-                    .ToListAsync();
-                
-                var workItemsWithThisFile = allWorkItems
-                    .Where(wi => ContainsFileId(wi.File_ID, file.Id))
-                    .ToList();
-                
-                if (workItemsWithThisFile.Any())
+                    // Remove file record from database FIRST
+                    _context.Files.Remove(fileInTransaction);
+                    await _context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                }
+                catch (DbUpdateException dbEx)
                 {
-                    // Remove the deleted file ID from File_ID string
-                    foreach (var workItem in workItemsWithThisFile)
-                    {
-                        workItem.File_ID = RemoveFileId(workItem.File_ID, file.Id);
-                    }
-                    _logger?.LogInformation("Removed file ID {FileId} from File_ID for {Count} WorkItems", 
-                        file.Id, workItemsWithThisFile.Count);
+                    await transaction.RollbackAsync();
+                    _logger?.LogError(dbEx, "Database error deleting file: {Message}", dbEx.Message);
+                    throw;
                 }
-            }
-            
-            // Note: We no longer update FilePath in MachineAssignment since files are tracked in Files table via AssignmentID
-
-            // Remove file record from database FIRST
-            _context.Files.Remove(file);
-            await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger?.LogError(ex, "Error deleting file: {Message}", ex.Message);
+                    throw;
+                }
+            });
 
             // Only delete physical file AFTER successful database deletion
             if (!string.IsNullOrWhiteSpace(filePath) && System.IO.File.Exists(filePath))
@@ -264,13 +290,11 @@ public class FilesController : ControllerBase
         }
         catch (DbUpdateException dbEx)
         {
-            await transaction.RollbackAsync();
             _logger?.LogError(dbEx, "Database error deleting file: {Message}", dbEx.Message);
             return StatusCode(500, new { error = "Error deleting file from database", message = dbEx.InnerException?.Message ?? dbEx.Message });
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync();
             _logger?.LogError(ex, "Error deleting file: {Message}", ex.Message);
             return StatusCode(500, new { error = "Error deleting file", message = ex.Message });
         }
@@ -398,101 +422,128 @@ public class FilesController : ControllerBase
             // Get uploaded by from claims
             var uploadedBy = User.Identity?.Name ?? "Unknown";
 
-            // Use transaction to ensure atomicity - if database save fails, rollback and cleanup file
-            FileItem fileItem;
-            using var transaction = await _context.Database.BeginTransactionAsync();
+            // Use execution strategy to support retries with transaction
+            FileItem? fileItem = null;
+            var strategy = _context.Database.CreateExecutionStrategy();
+            
             try
             {
-                // Create file record
-                fileItem = new FileItem
+                await strategy.ExecuteAsync(async () =>
                 {
-                    AssignmentID = assignmentId,
-                    FileName = fileName,
-                    FilePath = filePath,
-                    FileType = fileType,
-                    FileSize = file.Length,
-                    UploadDate = DateTime.Now,
-                    UploadedBy = uploadedBy,
-                    Description = description
-                };
-
-                // Save file first to get its Id
-                _context.Files.Add(fileItem);
-                await _context.SaveChangesAsync();
-
-                // Update MachineAssignment.File_ID with the uploaded file's Id
-                // If this is the first file or File_ID is null, set it to this file's Id
-                // Note: We no longer update FilePath in MachineAssignment since files are tracked in Files table via AssignmentID
-                if (!assignment.File_ID.HasValue)
-                {
-                    assignment.File_ID = fileItem.Id;
-                    _logger?.LogInformation("Setting File_ID to {FileId} for AssignmentID {AssignmentID}", fileItem.Id, assignmentId);
-                }
-
-                // Update File_ID only for WorkItems that belong to the current user
-                // Get current user info from claims
-                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
-                    ?? User.FindFirst("sub")?.Value;
-                var currentUserName = User.Identity?.Name;
-                
-                // Try to get user from database to match with WorkItem.PersonName
-                User? currentUser = null;
-                if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out int userId))
-                {
-                    currentUser = await _context.Users.FindAsync(userId);
-                }
-                
-                // Get all possible identifiers for current user
-                var userIdentifiers = new List<string>();
-                if (currentUser != null)
-                {
-                    userIdentifiers.Add(currentUser.UserId.ToString());
-                    if (!string.IsNullOrEmpty(currentUser.UserName))
-                        userIdentifiers.Add(currentUser.UserName);
-                    if (!string.IsNullOrEmpty(currentUser.FullName))
-                        userIdentifiers.Add(currentUser.FullName);
-                }
-                if (!string.IsNullOrEmpty(currentUserName))
-                    userIdentifiers.Add(currentUserName);
-                if (!string.IsNullOrEmpty(userIdClaim))
-                    userIdentifiers.Add(userIdClaim);
-                
-                // Find WorkItems that belong to current user
-                var workItems = await _context.WorkItems
-                    .Where(wi => wi.AssignmentID == assignmentId)
-                    .ToListAsync();
-                
-                var userWorkItems = workItems
-                    .Where(wi => !string.IsNullOrEmpty(wi.PersonName) && 
-                                 userIdentifiers.Any(id => 
-                                     wi.PersonName.Equals(id, StringComparison.OrdinalIgnoreCase)))
-                    .ToList();
-                
-                if (userWorkItems.Any())
-                {
-                    foreach (var workItem in userWorkItems)
+                    await using var transaction = await _context.Database.BeginTransactionAsync();
+                    try
                     {
-                        // Add file ID to File_ID string if not already present
-                        if (!ContainsFileId(workItem.File_ID, fileItem.Id))
+                        // Create file record
+                        fileItem = new FileItem
                         {
-                            workItem.File_ID = AddFileId(workItem.File_ID, fileItem.Id);
+                            AssignmentID = assignmentId,
+                            FileName = fileName,
+                            FilePath = filePath,
+                            FileType = fileType,
+                            FileSize = file.Length,
+                            UploadDate = DateTime.Now,
+                            UploadedBy = uploadedBy,
+                            Description = description
+                        };
+
+                        // Save file first to get its Id
+                        _context.Files.Add(fileItem);
+                        await _context.SaveChangesAsync();
+
+                        // Update MachineAssignment.File_ID with the uploaded file's Id
+                        // If this is the first file or File_ID is null, set it to this file's Id
+                        // Note: We no longer update FilePath in MachineAssignment since files are tracked in Files table via AssignmentID
+                        if (!assignment.File_ID.HasValue)
+                        {
+                            assignment.File_ID = fileItem.Id;
+                            _logger?.LogInformation("Setting File_ID to {FileId} for AssignmentID {AssignmentID}", fileItem.Id, assignmentId);
                         }
+
+                        // Update File_ID only for WorkItems that belong to the current user
+                        // Get current user info from claims
+                        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+                            ?? User.FindFirst("sub")?.Value;
+                        var currentUserName = User.Identity?.Name;
+                        
+                        // Try to get user from database to match with WorkItem.PersonName
+                        User? currentUser = null;
+                        if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out int userId))
+                        {
+                            currentUser = await _context.Users.FindAsync(userId);
+                        }
+                        
+                        // Get all possible identifiers for current user
+                        var userIdentifiers = new List<string>();
+                        if (currentUser != null)
+                        {
+                            userIdentifiers.Add(currentUser.UserId.ToString());
+                            if (!string.IsNullOrEmpty(currentUser.UserName))
+                                userIdentifiers.Add(currentUser.UserName);
+                            if (!string.IsNullOrEmpty(currentUser.FullName))
+                                userIdentifiers.Add(currentUser.FullName);
+                        }
+                        if (!string.IsNullOrEmpty(currentUserName))
+                            userIdentifiers.Add(currentUserName);
+                        if (!string.IsNullOrEmpty(userIdClaim))
+                            userIdentifiers.Add(userIdClaim);
+                        
+                        // Find WorkItems that belong to current user
+                        var workItems = await _context.WorkItems
+                            .Where(wi => wi.AssignmentID == assignmentId)
+                            .ToListAsync();
+                        
+                        var userWorkItems = workItems
+                            .Where(wi => !string.IsNullOrEmpty(wi.PersonName) && 
+                                         userIdentifiers.Any(id => 
+                                             wi.PersonName.Equals(id, StringComparison.OrdinalIgnoreCase)))
+                            .ToList();
+                        
+                        if (userWorkItems.Any())
+                        {
+                            foreach (var workItem in userWorkItems)
+                            {
+                                // Add file ID to File_ID string if not already present
+                                if (!ContainsFileId(workItem.File_ID, fileItem.Id))
+                                {
+                                    workItem.File_ID = AddFileId(workItem.File_ID, fileItem.Id);
+                                }
+                            }
+                            _logger?.LogInformation("Added file ID {FileId} to File_ID for {Count} WorkItems of current user (AssignmentID {AssignmentID})", 
+                                fileItem.Id, userWorkItems.Count, assignmentId);
+                        }
+                        else
+                        {
+                            _logger?.LogInformation("No matching WorkItems found for current user (AssignmentID {AssignmentID}, UserIdentifiers: {UserIdentifiers})", 
+                                assignmentId, string.Join(", ", userIdentifiers));
+                        }
+                        
+                        // Save all changes (assignment and work items)
+                        await _context.SaveChangesAsync();
+                        
+                        // Commit transaction if everything succeeds
+                        await transaction.CommitAsync();
+                        _logger?.LogInformation("File uploaded and saved successfully: {FilePath}", filePath);
                     }
-                    _logger?.LogInformation("Added file ID {FileId} to File_ID for {Count} WorkItems of current user (AssignmentID {AssignmentID})", 
-                        fileItem.Id, userWorkItems.Count, assignmentId);
-                }
-                else
+                    catch (DbUpdateException dbEx)
+                    {
+                        await transaction.RollbackAsync();
+                        _logger?.LogError(dbEx, "Database error saving file: {Message}", dbEx.Message);
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        await transaction.RollbackAsync();
+                        _logger?.LogError(ex, "Unexpected error uploading file: {Message}", ex.Message);
+                        throw;
+                    }
+                });
+
+                // Safety check: fileItem must be assigned if transaction succeeded
+                if (fileItem == null)
                 {
-                    _logger?.LogInformation("No matching WorkItems found for current user (AssignmentID {AssignmentID}, UserIdentifiers: {UserIdentifiers})", 
-                        assignmentId, string.Join(", ", userIdentifiers));
+                    _logger?.LogError("fileItem is null after successful execution strategy run.");
+                    return StatusCode(500, new { error = "Error uploading file", message = "fileItem not created" });
                 }
-                
-                // Save all changes (assignment and work items)
-                await _context.SaveChangesAsync();
-                
-                // Commit transaction if everything succeeds
-                await transaction.CommitAsync();
-                _logger?.LogInformation("File uploaded and saved successfully: {FilePath}", filePath);
 
                 // Create response after successful commit
                 var response = new
@@ -512,7 +563,6 @@ public class FilesController : ControllerBase
             }
             catch (DbUpdateException dbEx)
             {
-                await transaction.RollbackAsync();
                 _logger?.LogError(dbEx, "Database error saving file: {Message}", dbEx.Message);
                 
                 // Cleanup file on disk if database save failed
@@ -533,7 +583,6 @@ public class FilesController : ControllerBase
             }
             catch (Exception ex)
             {
-                await transaction.RollbackAsync();
                 _logger?.LogError(ex, "Unexpected error uploading file: {Message}", ex.Message);
                 
                 // Cleanup file on disk if any error occurs

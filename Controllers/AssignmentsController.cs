@@ -176,86 +176,90 @@ public class AssignmentsController : ControllerBase
                 return BadRequest(new { error = "MachineName is required" });
             }
 
-            // Use transaction to ensure both TechnicalSheet and MachineAssignment are created atomically
-            MachineAssignment assignment;
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
+            // Use execution strategy to support retries with transaction
+            MachineAssignment assignment = new();
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                // Check if TechnicalSheet exists, if not create a basic one
-                // Use FirstOrDefaultAsync instead of FindAsync for string keys
-                var technicalSheet = await _context.TechnicalSheets
-                    .FirstOrDefaultAsync(ts => ts.TBKT_ID == dto.TBKT_ID);
-                
-                if (technicalSheet == null)
+                await using var transaction = await _context.Database.BeginTransactionAsync();
+                try
                 {
-                    _logger?.LogInformation("Creating new TechnicalSheet with TBKT_ID: {TBKT_ID}", dto.TBKT_ID);
-                    try
+                    // Check if TechnicalSheet exists, if not create a basic one
+                    // Use FirstOrDefaultAsync instead of FindAsync for string keys
+                    var technicalSheet = await _context.TechnicalSheets
+                        .FirstOrDefaultAsync(ts => ts.TBKT_ID == dto.TBKT_ID);
+                    
+                    if (technicalSheet == null)
                     {
-                        technicalSheet = new TechnicalSheet
+                        _logger?.LogInformation("Creating new TechnicalSheet with TBKT_ID: {TBKT_ID}", dto.TBKT_ID);
+                        try
                         {
-                            TBKT_ID = dto.TBKT_ID
-                        };
-                        _context.TechnicalSheets.Add(technicalSheet);
-                        // Save TechnicalSheet first to ensure it exists before creating MachineAssignment
-                        await _context.SaveChangesAsync();
-                        _logger?.LogInformation("TechnicalSheet created successfully with TBKT_ID: {TBKT_ID}", dto.TBKT_ID);
+                            technicalSheet = new TechnicalSheet
+                            {
+                                TBKT_ID = dto.TBKT_ID
+                            };
+                            _context.TechnicalSheets.Add(technicalSheet);
+                            // Save TechnicalSheet first to ensure it exists before creating MachineAssignment
+                            await _context.SaveChangesAsync();
+                            _logger?.LogInformation("TechnicalSheet created successfully with TBKT_ID: {TBKT_ID}", dto.TBKT_ID);
+                        }
+                        catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx) when (
+                            dbEx.InnerException is Microsoft.Data.SqlClient.SqlException sqlEx && 
+                            (sqlEx.Number == 2627 || sqlEx.Number == 2601)) // Primary key or unique constraint violation
+                        {
+                            // TechnicalSheet was created by another request concurrently, query it again
+                            _logger?.LogWarning("TechnicalSheet with TBKT_ID {TBKT_ID} was created concurrently, querying again...", dto.TBKT_ID);
+                            // Remove the entity from context to avoid tracking conflicts
+                            if (technicalSheet != null)
+                            {
+                                _context.Entry(technicalSheet).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+                            }
+                            // Query again
+                            technicalSheet = await _context.TechnicalSheets
+                                .FirstOrDefaultAsync(ts => ts.TBKT_ID == dto.TBKT_ID);
+                            
+                            if (technicalSheet == null)
+                            {
+                                // Still null after retry, this is unexpected
+                                _logger?.LogError("TechnicalSheet with TBKT_ID {TBKT_ID} still not found after duplicate key error", dto.TBKT_ID);
+                                throw new Exception($"Failed to create or retrieve TechnicalSheet with TBKT_ID '{dto.TBKT_ID}'. Duplicate key error occurred but record not found on retry.", dbEx);
+                            }
+                            _logger?.LogInformation("Successfully retrieved TechnicalSheet with TBKT_ID: {TBKT_ID} after concurrent creation", dto.TBKT_ID);
+                        }
                     }
-                    catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx) when (
-                        dbEx.InnerException is Microsoft.Data.SqlClient.SqlException sqlEx && 
-                        (sqlEx.Number == 2627 || sqlEx.Number == 2601)) // Primary key or unique constraint violation
+                    else
                     {
-                        // TechnicalSheet was created by another request concurrently, query it again
-                        _logger?.LogWarning("TechnicalSheet with TBKT_ID {TBKT_ID} was created concurrently, querying again...", dto.TBKT_ID);
-                        // Remove the entity from context to avoid tracking conflicts
-                        if (technicalSheet != null)
-                        {
-                            _context.Entry(technicalSheet).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
-                        }
-                        // Query again
-                        technicalSheet = await _context.TechnicalSheets
-                            .FirstOrDefaultAsync(ts => ts.TBKT_ID == dto.TBKT_ID);
-                        
-                        if (technicalSheet == null)
-                        {
-                            // Still null after retry, this is unexpected
-                            _logger?.LogError("TechnicalSheet with TBKT_ID {TBKT_ID} still not found after duplicate key error", dto.TBKT_ID);
-                            throw new Exception($"Failed to create or retrieve TechnicalSheet with TBKT_ID '{dto.TBKT_ID}'. Duplicate key error occurred but record not found on retry.", dbEx);
-                        }
-                        _logger?.LogInformation("Successfully retrieved TechnicalSheet with TBKT_ID: {TBKT_ID} after concurrent creation", dto.TBKT_ID);
+                        _logger?.LogInformation("TechnicalSheet already exists with TBKT_ID: {TBKT_ID}", dto.TBKT_ID);
                     }
-                }
-                else
-                {
-                    _logger?.LogInformation("TechnicalSheet already exists with TBKT_ID: {TBKT_ID}", dto.TBKT_ID);
-                }
 
-                assignment = new MachineAssignment
-                {
-                    TBKT_ID = dto.TBKT_ID,
-                    MachineName = dto.MachineName,
-                    StandardRequirement = dto.StandardRequirement,
-                    AdditionalRequest = dto.AdditionalRequest,
-                    DeliveryDate = dto.DeliveryDate,
-                    Designer = dto.Designer,
-                    TeamLeader = dto.TeamLeader,
-                    FilePath = dto.FilePath,
-                    Status = dto.Status
-                };
+                    assignment = new MachineAssignment
+                    {
+                        TBKT_ID = dto.TBKT_ID,
+                        MachineName = dto.MachineName,
+                        StandardRequirement = dto.StandardRequirement,
+                        AdditionalRequest = dto.AdditionalRequest,
+                        DeliveryDate = dto.DeliveryDate,
+                        Designer = dto.Designer,
+                        TeamLeader = dto.TeamLeader,
+                        FilePath = dto.FilePath,
+                        Status = dto.Status
+                    };
 
-                _context.MachineAssignments.Add(assignment);
-                _logger?.LogInformation("Adding MachineAssignment with TBKT_ID: {TBKT_ID}, MachineName: {MachineName}", dto.TBKT_ID, dto.MachineName);
-                await _context.SaveChangesAsync();
-                _logger?.LogInformation("MachineAssignment saved successfully with AssignmentID: {AssignmentID}", assignment.AssignmentID);
-                
-                // Commit transaction
-                await transaction.CommitAsync();
-            }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                _logger?.LogError(ex, "Error in transaction, rolling back. Error: {Message}", ex.Message);
-                throw;
-            }
+                    _context.MachineAssignments.Add(assignment);
+                    _logger?.LogInformation("Adding MachineAssignment with TBKT_ID: {TBKT_ID}, MachineName: {MachineName}", dto.TBKT_ID, dto.MachineName);
+                    await _context.SaveChangesAsync();
+                    _logger?.LogInformation("MachineAssignment saved successfully with AssignmentID: {AssignmentID}", assignment.AssignmentID);
+                    
+                    // Commit transaction
+                    await transaction.CommitAsync();
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger?.LogError(ex, "Error in transaction, rolling back. Error: {Message}", ex.Message);
+                    throw;
+                }
+            });
 
             // Reload with related data
             await _context.Entry(assignment)

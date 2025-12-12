@@ -269,17 +269,9 @@ public class ApplicationDbContext : DbContext
                 .HasColumnType("nvarchar")
                 .HasMaxLength(500); // Allow storing multiple file IDs separated by commas
             
-            // PersonConfirmation - convert between bool? (C#) and nvarchar (database)
-            // Database column is nvarchar(50) but model expects bool?
+            // Map PersonConfirmation directly to bit (bool?) in DB
             entity.Property(e => e.PersonConfirmation)
-                .HasConversion(
-                    // Convert bool? to string for database
-                    v => v.HasValue ? (v.Value ? "1" : "0") : null,
-                    // Convert string from database to bool?
-                    v => string.IsNullOrEmpty(v) 
-                        ? (bool?)null 
-                        : (v.Trim().ToLower() == "1" || v.Trim().ToLower() == "true" || v.Trim().ToLower() == "yes" || v.Trim() == "1"))
-                .HasColumnType("nvarchar(50)")
+                .HasColumnType("bit")
                 .IsRequired(false);
             
             entity.HasOne(e => e.MachineAssignment)

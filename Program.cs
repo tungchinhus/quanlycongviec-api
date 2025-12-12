@@ -38,9 +38,13 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// Add Entity Framework - SQL Server
+// Add Entity Framework - SQL Server with retry on failure for transient errors
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"), 
+        sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
+            maxRetryCount: 5,
+            maxRetryDelay: TimeSpan.FromSeconds(30),
+            errorNumbersToAdd: null)));
 
 // Add CORS - Allow Angular frontend
 // Cấu hình CORS theo hướng dẫn: https://docs.microsoft.com/en-us/aspnet/core/security/cors

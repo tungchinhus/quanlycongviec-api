@@ -395,11 +395,22 @@ public class FilesController : ControllerBase
                 return StatusCode(500, new { error = "Error creating storage directory", message = dirEx.Message, path = storagePath });
             }
 
-            // Generate unique filename to avoid conflicts
-            var fileName = file.FileName;
+            // Sử dụng đúng tên file gốc khi lưu
+            // Đồng thời kiểm tra nếu trùng tên thì không lưu và trả về thông báo lỗi
+            var fileName = Path.GetFileName(file.FileName);
             var fileExtension = Path.GetExtension(fileName);
-            var uniqueFileName = $"{Guid.NewGuid()}{fileExtension}";
-            var filePath = Path.Combine(storagePath, uniqueFileName);
+            var filePath = Path.Combine(storagePath, fileName);
+
+            // Nếu file cùng tên đã tồn tại trên ổ đĩa thì không cho phép ghi đè
+            if (System.IO.File.Exists(filePath))
+            {
+                _logger?.LogWarning("Attempt to upload duplicate file: {FilePath}", filePath);
+                return Conflict(new
+                {
+                    error = "FileAlreadyExists",
+                    message = "Đã tồn tại file cùng tên trong thư mục lưu trữ. Vui lòng đổi tên file trước khi upload."
+                });
+            }
 
             // Save file to disk
             try

@@ -343,6 +343,53 @@ public class FilesController : ControllerBase
         };
     }
 
+    /// <summary>
+    /// Sanitize username để sử dụng làm tên folder (loại bỏ ký tự không hợp lệ)
+    /// </summary>
+    private string SanitizeFolderName(string username)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+            return "Unknown";
+        
+        // Loại bỏ các ký tự không hợp lệ cho tên folder: / \ : * ? " < > |
+        var invalidChars = Path.GetInvalidFileNameChars().Concat(new[] { '/', '\\', ':', '*', '?', '"', '<', '>', '|' }).ToArray();
+        var sanitized = string.Join("_", username.Split(invalidChars, StringSplitOptions.RemoveEmptyEntries));
+        
+        // Loại bỏ khoảng trắng ở đầu và cuối, thay thế khoảng trắng bằng underscore
+        sanitized = sanitized.Trim().Replace(" ", "_");
+        
+        // Đảm bảo không rỗng
+        if (string.IsNullOrWhiteSpace(sanitized))
+            return "Unknown";
+        
+        return sanitized;
+    }
+
+    /// <summary>
+    /// Lấy username của user đang đăng nhập từ claims hoặc database
+    /// </summary>
+    private async Task<string> GetCurrentUsernameAsync()
+    {
+        // Thử lấy từ User.Identity.Name trước
+        var username = User.Identity?.Name;
+        
+        if (!string.IsNullOrWhiteSpace(username))
+            return username;
+        
+        // Nếu không có, thử lấy từ database thông qua userId claim
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+            ?? User.FindFirst("sub")?.Value;
+        
+        if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out int userId))
+        {
+            var user = await _context.Users.FindAsync(userId);
+            if (user != null && !string.IsNullOrWhiteSpace(user.UserName))
+                return user.UserName;
+        }
+        
+        return "Unknown";
+    }
+
     // POST: api/Files/upload
     [HttpPost("upload")]
     public async Task<ActionResult<FileItem>> UploadFile(IFormFile file, [FromForm] string? description = null, [FromForm] int assignmentId = 0)
@@ -374,32 +421,46 @@ public class FilesController : ControllerBase
             }
 
             // Get storage path
-            var storagePath = _fileStorageOptions.Path;
-            if (string.IsNullOrWhiteSpace(storagePath))
+            var baseStoragePath = _fileStorageOptions.Path;
+            if (string.IsNullOrWhiteSpace(baseStoragePath))
             {
-                storagePath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads");
+                baseStoragePath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads");
             }
+
+            // Lấy username của user đang đăng nhập và tạo folder theo username
+            var currentUsername = await GetCurrentUsernameAsync();
+            var sanitizedUsername = SanitizeFolderName(currentUsername);
+            
+            // Tạo đường dẫn lưu trữ theo username: storagePath/username/
+            var userStoragePath = Path.Combine(baseStoragePath, sanitizedUsername);
 
             // Create directory if it doesn't exist
             try
             {
-                if (!Directory.Exists(storagePath))
+                if (!Directory.Exists(baseStoragePath))
                 {
-                    Directory.CreateDirectory(storagePath);
-                    _logger?.LogInformation("Created storage directory: {StoragePath}", storagePath);
+                    Directory.CreateDirectory(baseStoragePath);
+                    _logger?.LogInformation("Created base storage directory: {StoragePath}", baseStoragePath);
+                }
+                
+                if (!Directory.Exists(userStoragePath))
+                {
+                    Directory.CreateDirectory(userStoragePath);
+                    _logger?.LogInformation("Created user storage directory: {UserStoragePath} for user: {Username}", userStoragePath, currentUsername);
                 }
             }
             catch (Exception dirEx)
             {
-                _logger?.LogError(dirEx, "Error creating storage directory: {StoragePath}", storagePath);
-                return StatusCode(500, new { error = "Error creating storage directory", message = dirEx.Message, path = storagePath });
+                _logger?.LogError(dirEx, "Error creating storage directory: {UserStoragePath}", userStoragePath);
+                return StatusCode(500, new { error = "Error creating storage directory", message = dirEx.Message, path = userStoragePath });
             }
 
             // Sử dụng đúng tên file gốc khi lưu
             // Đồng thời kiểm tra nếu trùng tên thì không lưu và trả về thông báo lỗi
             var fileName = Path.GetFileName(file.FileName);
             var fileExtension = Path.GetExtension(fileName);
-            var filePath = Path.Combine(storagePath, fileName);
+            // Lưu file vào folder của user: storagePath/username/filename
+            var filePath = Path.Combine(userStoragePath, fileName);
 
             // Nếu file cùng tên đã tồn tại trên ổ đĩa thì không cho phép ghi đè
             if (System.IO.File.Exists(filePath))
@@ -430,8 +491,8 @@ public class FilesController : ControllerBase
             // Get file type from content type or extension
             var fileType = file.ContentType ?? fileExtension.TrimStart('.');
 
-            // Get uploaded by from claims
-            var uploadedBy = User.Identity?.Name ?? "Unknown";
+            // Get uploaded by - sử dụng currentUsername đã lấy ở trên
+            var uploadedBy = currentUsername;
 
             // Use execution strategy to support retries with transaction
             FileItem? fileItem = null;

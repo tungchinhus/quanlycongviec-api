@@ -121,7 +121,12 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    // Policy cho phép admin bypass tất cả - Admin có full permissions
+    options.AddPolicy("AdminFullAccess", policy => 
+        policy.RequireRole(RoleHelper.AuthorizeRoles.Administrator, RoleHelper.AuthorizeRoles.Admin));
+});
 
 // Register Firebase Service
 builder.Services.AddScoped<quanlyfilesBE.Services.IFirebaseService, quanlyfilesBE.Services.FirebaseService>();

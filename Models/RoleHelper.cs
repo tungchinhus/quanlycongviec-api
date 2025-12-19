@@ -53,6 +53,28 @@ public static class RoleHelper
     }
 
     /// <summary>
+    /// Kiểm tra xem user có quyền full (admin) - Admin có quyền bypass tất cả permission checks
+    /// </summary>
+    public static bool HasFullPermissions(ClaimsPrincipal? user)
+    {
+        return IsAdministrator(user);
+    }
+
+    /// <summary>
+    /// Kiểm tra xem user có permission cụ thể không, hoặc là admin (admin có full permissions)
+    /// </summary>
+    public static bool HasPermission(ClaimsPrincipal? user, string permissionName)
+    {
+        if (HasFullPermissions(user))
+            return true; // Admin có full permissions
+        
+        if (user == null) return false;
+        
+        // Kiểm tra permission từ claims
+        return user.HasClaim("permission", permissionName);
+    }
+
+    /// <summary>
     /// Lấy role name string để dùng trong [Authorize(Roles = "...")]
     /// </summary>
     public static class AuthorizeRoles
@@ -64,6 +86,9 @@ public static class RoleHelper
         
         // Support legacy "Admin" name
         public const string Admin = "Administrator";
+        
+        // All roles string for endpoints that should allow all authenticated users
+        public const string AllRoles = "Administrator,Admin,Manager,User,Guest";
     }
 }
 

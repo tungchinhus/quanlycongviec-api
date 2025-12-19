@@ -613,6 +613,9 @@ public class AssignmentsController : ControllerBase
     {
         try
         {
+            // Kiểm tra nếu user là admin - admin có quyền xem tất cả work items
+            var isAdmin = RoleHelper.IsAdministrator(User);
+            
             // Lấy UserId từ JWT token
             var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
                 ?? User.FindFirst("sub")?.Value;
@@ -629,29 +632,51 @@ public class AssignmentsController : ControllerBase
                 return NotFound(new { error = "User not found" });
             }
 
-            // Tìm work items theo PersonName
-            // PersonName có thể là: UserId (string), FullName, hoặc UserName
-            var userIdString = userId.ToString();
+            List<WorkItemRawData> workItemsData;
             
-            // Query work items using raw SQL to handle PersonConfirmation type conversion
-            // This avoids InvalidCastException when database has string instead of bit
-            var workItemsData = await _context.Database.SqlQueryRaw<WorkItemRawData>(
-                @"SELECT 
-                    wi.WorkItemID,
-                    wi.AssignmentID,
-                    wi.WorkType,
-                    wi.PersonName,
-                    wi.StartDate,
-                    wi.ExpectedFinish,
-                    wi.ActualFinish,
-                    CAST(wi.PersonConfirmation AS NVARCHAR(10)) AS PersonConfirmationRaw,
-                    wi.Notes
-                  FROM WorkItem wi
-                  WHERE wi.PersonName = {0} OR wi.PersonName = {1} OR wi.PersonName = {2}
-                  ORDER BY wi.StartDate DESC",
-                userIdString,
-                user.FullName ?? "",
-                user.UserName ?? "").ToListAsync();
+            if (isAdmin)
+            {
+                // Admin có quyền xem tất cả work items
+                workItemsData = await _context.Database.SqlQueryRaw<WorkItemRawData>(
+                    @"SELECT 
+                        wi.WorkItemID,
+                        wi.AssignmentID,
+                        wi.WorkType,
+                        wi.PersonName,
+                        wi.StartDate,
+                        wi.ExpectedFinish,
+                        wi.ActualFinish,
+                        CAST(wi.PersonConfirmation AS NVARCHAR(10)) AS PersonConfirmationRaw,
+                        wi.Notes
+                      FROM WorkItem wi
+                      ORDER BY wi.StartDate DESC").ToListAsync();
+            }
+            else
+            {
+                // Tìm work items theo PersonName
+                // PersonName có thể là: UserId (string), FullName, hoặc UserName
+                var userIdString = userId.ToString();
+                
+                // Query work items using raw SQL to handle PersonConfirmation type conversion
+                // This avoids InvalidCastException when database has string instead of bit
+                workItemsData = await _context.Database.SqlQueryRaw<WorkItemRawData>(
+                    @"SELECT 
+                        wi.WorkItemID,
+                        wi.AssignmentID,
+                        wi.WorkType,
+                        wi.PersonName,
+                        wi.StartDate,
+                        wi.ExpectedFinish,
+                        wi.ActualFinish,
+                        CAST(wi.PersonConfirmation AS NVARCHAR(10)) AS PersonConfirmationRaw,
+                        wi.Notes
+                      FROM WorkItem wi
+                      WHERE wi.PersonName = {0} OR wi.PersonName = {1} OR wi.PersonName = {2}
+                      ORDER BY wi.StartDate DESC",
+                    userIdString,
+                    user.FullName ?? "",
+                    user.UserName ?? "").ToListAsync();
+            }
 
             // Get assignment IDs to load MachineAssignments
             var assignmentIds = workItemsData.Select(w => w.AssignmentID).Distinct().ToList();

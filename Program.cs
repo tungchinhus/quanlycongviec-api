@@ -7,6 +7,13 @@ using quanlyfilesBE.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Configure file logging directory
+var logDirectory = Path.Combine(Directory.GetCurrentDirectory(), "logs");
+if (!Directory.Exists(logDirectory))
+{
+    Directory.CreateDirectory(logDirectory);
+}
+
 // Add services to the container.
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -130,6 +137,9 @@ builder.Services.AddAuthorization(options =>
 
 // Register Firebase Service
 builder.Services.AddScoped<quanlyfilesBE.Services.IFirebaseService, quanlyfilesBE.Services.FirebaseService>();
+
+// Register File Logger Service
+builder.Services.AddSingleton<quanlyfilesBE.Services.IFileLoggerService, quanlyfilesBE.Services.FileLoggerService>();
 
 // Configure FileStorage options
 builder.Services.Configure<FileStorageOptions>(

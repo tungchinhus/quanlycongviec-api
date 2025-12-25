@@ -321,11 +321,37 @@ public class UsersController : ControllerBase
         if (user == null)
             return NotFound();
 
-        // Lấy thông tin user hiện tại từ token
-        // JWT token có claim "sub" chứa UserId (theo JwtRegisteredClaimNames.Sub)
-        var currentUserIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
+        // Lấy thông tin user hiện tại từ token (FirebaseUID)
+        var firebaseUID = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
             ?? User.FindFirst("sub")?.Value;
-        var currentUserId = int.TryParse(currentUserIdClaim, out var userId) ? userId : 0;
+        
+        User? currentUser = null;
+        int currentUserId = 0;
+        
+        if (!string.IsNullOrEmpty(firebaseUID))
+        {
+            currentUser = await _db.Users
+                .FirstOrDefaultAsync(u => u.FirebaseUID == firebaseUID);
+            
+            if (currentUser == null)
+            {
+                // Nếu không tìm thấy theo FirebaseUID, thử tìm theo email
+                var emailClaim = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value 
+                                ?? User.FindFirst("email")?.Value;
+                
+                if (!string.IsNullOrEmpty(emailClaim))
+                {
+                    currentUser = await _db.Users
+                        .FirstOrDefaultAsync(u => u.Email == emailClaim);
+                }
+            }
+            
+            if (currentUser != null)
+            {
+                currentUserId = currentUser.UserId;
+            }
+        }
+        
         var isAdmin = RoleHelper.IsAdministrator(User);
         var isManager = RoleHelper.IsManager(User);
         

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Linq;
 
 namespace quanlyfilesBE.Models;
 
@@ -18,12 +19,45 @@ public static class RoleHelper
     }
 
     /// <summary>
-    /// Kiểm tra xem user có role Manager không
+    /// Kiểm tra xem user có role Manager không (bao gồm Manager, ManagerL1, ManagerL2, v.v.)
     /// </summary>
     public static bool IsManager(ClaimsPrincipal? user)
     {
         if (user == null) return false;
-        return user.IsInRole(RoleType.Manager.ToStringName());
+        
+        // Check role "Manager" chính xác
+        var exactMatch = user.IsInRole(RoleType.Manager.ToStringName());
+        
+        if (exactMatch)
+            return true;
+        
+        // Check các role Manager variants (ManagerL1, ManagerL2, ManagerL3, v.v.)
+        // Kiểm tra tất cả claims - có thể role được lưu trong custom claims với type khác
+        // Check cả role claims và tất cả claims để tìm "Manager" prefix
+        var roleClaims = user.Claims
+            .Where(c => c.Type == ClaimTypes.Role || 
+                       c.Type == "role" || 
+                       c.Type == "roles" ||
+                       c.Type == "http://schemas.microsoft.com/ws/2008/06/identity/claims/role" ||
+                       c.Type == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/role")
+            .Select(c => c.Value)
+            .ToList();
+        
+        // Check role claims trước
+        var managerRoles = roleClaims.Any(role => role != null && role.StartsWith("Manager", StringComparison.OrdinalIgnoreCase));
+        
+        // Nếu không tìm thấy trong role claims, check tất cả claims (có thể role được lưu trong custom claim)
+        if (!managerRoles)
+        {
+            var allClaimValues = user.Claims
+                .Select(c => c.Value)
+                .Where(v => !string.IsNullOrEmpty(v))
+                .ToList();
+            
+            managerRoles = allClaimValues.Any(value => value.StartsWith("Manager", StringComparison.OrdinalIgnoreCase));
+        }
+        
+        return managerRoles;
     }
 
     /// <summary>

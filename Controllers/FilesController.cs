@@ -366,26 +366,114 @@ public class FilesController : ControllerBase
     }
 
     /// <summary>
+    /// Tạo tên file duy nhất bằng cách thêm số thứ tự nếu file đã tồn tại
+    /// Ví dụ: file.pdf -> file (1).pdf -> file (2).pdf
+    /// </summary>
+    private string GetUniqueFileName(string directory, string fileName)
+    {
+        var filePath = Path.Combine(directory, fileName);
+        
+        // Nếu file chưa tồn tại, trả về tên gốc
+        if (!System.IO.File.Exists(filePath))
+        {
+            return fileName;
+        }
+        
+        // Tách tên file và extension
+        var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+        
+        // Thử thêm số thứ tự từ 1 đến 9999
+        for (int i = 1; i <= 9999; i++)
+        {
+            var newFileName = $"{fileNameWithoutExtension} ({i}){extension}";
+            var newFilePath = Path.Combine(directory, newFileName);
+            
+            if (!System.IO.File.Exists(newFilePath))
+            {
+                _logger?.LogInformation("File name conflict resolved: {OriginalFileName} -> {NewFileName}", fileName, newFileName);
+                return newFileName;
+            }
+        }
+        
+        // Nếu không tìm được tên duy nhất trong 9999 lần thử, thêm timestamp
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var timestampFileName = $"{fileNameWithoutExtension}_{timestamp}{extension}";
+        _logger?.LogWarning("Using timestamp for unique file name: {OriginalFileName} -> {TimestampFileName}", fileName, timestampFileName);
+        return timestampFileName;
+    }
+
+    /// <summary>
     /// Lấy username của user đang đăng nhập từ claims hoặc database
     /// </summary>
     private async Task<string> GetCurrentUsernameAsync()
     {
-        // Thử lấy từ User.Identity.Name trước
+        // Thử lấy từ User.Identity.Name trước (từ ClaimTypes.Name)
         var username = User.Identity?.Name;
         
         if (!string.IsNullOrWhiteSpace(username))
+        {
+            _logger?.LogInformation("Got username from User.Identity.Name: {Username}", username);
             return username;
+        }
         
-        // Nếu không có, thử lấy từ database thông qua userId claim
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+        // Thử lấy từ ClaimTypes.Name trực tiếp
+        var nameClaim = User.FindFirst(ClaimTypes.Name)?.Value;
+        if (!string.IsNullOrWhiteSpace(nameClaim))
+        {
+            _logger?.LogInformation("Got username from ClaimTypes.Name: {Username}", nameClaim);
+            return nameClaim;
+        }
+        
+        // Thử lấy từ JwtRegisteredClaimNames.Name
+        var jwtNameClaim = User.FindFirst("name")?.Value;
+        if (!string.IsNullOrWhiteSpace(jwtNameClaim))
+        {
+            _logger?.LogInformation("Got username from 'name' claim: {Username}", jwtNameClaim);
+            return jwtNameClaim;
+        }
+        
+        // Nếu không có, thử lấy từ database thông qua FirebaseUID claim
+        var firebaseUID = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
             ?? User.FindFirst("sub")?.Value;
         
-        if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out int userId))
+        if (!string.IsNullOrEmpty(firebaseUID))
         {
-            var user = await _context.Users.FindAsync(userId);
-            if (user != null && !string.IsNullOrWhiteSpace(user.UserName))
-                return user.UserName;
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.FirebaseUID == firebaseUID);
+            
+            if (user == null)
+            {
+                // Nếu không tìm thấy theo FirebaseUID, thử tìm theo email
+                var emailClaim = User.FindFirst(ClaimTypes.Email)?.Value 
+                                ?? User.FindFirst("email")?.Value;
+                
+                if (!string.IsNullOrEmpty(emailClaim))
+                {
+                    user = await _context.Users
+                        .FirstOrDefaultAsync(u => u.Email == emailClaim);
+                }
+            }
+            
+            if (user != null)
+            {
+                // Ưu tiên UserName, sau đó FullName, cuối cùng là UserId
+                if (!string.IsNullOrWhiteSpace(user.UserName))
+                {
+                    _logger?.LogInformation("Got username from database UserName: {Username}", user.UserName);
+                    return user.UserName;
+                }
+                if (!string.IsNullOrWhiteSpace(user.FullName))
+                {
+                    _logger?.LogInformation("Got username from database FullName: {Username}", user.FullName);
+                    return user.FullName;
+                }
+            }
         }
+        
+        // Log warning nếu không lấy được username
+        _logger?.LogWarning("Could not get username from claims or database. FirebaseUID: {FirebaseUID}, IdentityName: {IdentityName}", 
+            firebaseUID, User.Identity?.Name);
         
         return "Unknown";
     }
@@ -396,13 +484,18 @@ public class FilesController : ControllerBase
     {
         try
         {
+            _logger?.LogInformation("Upload file request received. FileName: {FileName}, FileSize: {FileSize}, AssignmentId: {AssignmentId}, Description: {Description}",
+                file?.FileName, file?.Length, assignmentId, description);
+
             if (file == null || file.Length == 0)
             {
+                _logger?.LogWarning("Upload file request rejected: No file uploaded");
                 return BadRequest(new { error = "No file uploaded" });
             }
 
             if (assignmentId <= 0)
             {
+                _logger?.LogWarning("Upload file request rejected: Invalid assignmentId {AssignmentId}", assignmentId);
                 return BadRequest(new { error = "assignmentId is required" });
             }
 
@@ -410,8 +503,11 @@ public class FilesController : ControllerBase
             var assignment = await _context.MachineAssignments.FindAsync(assignmentId);
             if (assignment == null)
             {
+                _logger?.LogWarning("Upload file request rejected: Assignment {AssignmentId} not found", assignmentId);
                 return NotFound(new { error = "Assignment not found" });
             }
+            
+            _logger?.LogInformation("Assignment {AssignmentId} found: {MachineName}", assignmentId, assignment.MachineName);
 
             // Validate file size (e.g., max 50MB)
             const long maxFileSize = 50 * 1024 * 1024; // 50MB
@@ -431,8 +527,14 @@ public class FilesController : ControllerBase
             var currentUsername = await GetCurrentUsernameAsync();
             var sanitizedUsername = SanitizeFolderName(currentUsername);
             
+            _logger?.LogInformation("Current username: {CurrentUsername}, Sanitized: {SanitizedUsername}", 
+                currentUsername, sanitizedUsername);
+            
             // Tạo đường dẫn lưu trữ theo username: storagePath/username/
             var userStoragePath = Path.Combine(baseStoragePath, sanitizedUsername);
+            
+            _logger?.LogInformation("Base storage path: {BaseStoragePath}, User storage path: {UserStoragePath}", 
+                baseStoragePath, userStoragePath);
 
             // Create directory if it doesn't exist
             try
@@ -455,36 +557,47 @@ public class FilesController : ControllerBase
                 return StatusCode(500, new { error = "Error creating storage directory", message = dirEx.Message, path = userStoragePath });
             }
 
-            // Sử dụng đúng tên file gốc khi lưu
-            // Đồng thời kiểm tra nếu trùng tên thì không lưu và trả về thông báo lỗi
-            var fileName = Path.GetFileName(file.FileName);
-            var fileExtension = Path.GetExtension(fileName);
+            // Lấy tên file gốc và tạo tên file duy nhất nếu trùng
+            var originalFileName = Path.GetFileName(file.FileName);
+            var uniqueFileName = GetUniqueFileName(userStoragePath, originalFileName);
+            var fileExtension = Path.GetExtension(uniqueFileName);
+            
             // Lưu file vào folder của user: storagePath/username/filename
-            var filePath = Path.Combine(userStoragePath, fileName);
-
-            // Nếu file cùng tên đã tồn tại trên ổ đĩa thì không cho phép ghi đè
-            if (System.IO.File.Exists(filePath))
+            var filePath = Path.Combine(userStoragePath, uniqueFileName);
+            
+            // Log nếu tên file đã được thay đổi
+            if (originalFileName != uniqueFileName)
             {
-                _logger?.LogWarning("Attempt to upload duplicate file: {FilePath}", filePath);
-                return Conflict(new
-                {
-                    error = "FileAlreadyExists",
-                    message = "Đã tồn tại file cùng tên trong thư mục lưu trữ. Vui lòng đổi tên file trước khi upload."
-                });
+                _logger?.LogInformation("File name changed due to conflict: {OriginalFileName} -> {UniqueFileName}", originalFileName, uniqueFileName);
             }
+            
+            _logger?.LogInformation("File will be saved to: {FilePath}", filePath);
 
             // Save file to disk
             try
             {
+                _logger?.LogInformation("Starting to save file to disk: {FilePath}, Size: {FileSize} bytes", filePath, file.Length);
                 using (var stream = new FileStream(filePath, FileMode.Create))
                 {
                     await file.CopyToAsync(stream);
                 }
-                _logger?.LogInformation("File saved successfully: {FilePath}", filePath);
+                _logger?.LogInformation("File saved successfully to disk: {FilePath}", filePath);
+                
+                // Verify file was saved
+                if (System.IO.File.Exists(filePath))
+                {
+                    var savedFileInfo = new FileInfo(filePath);
+                    _logger?.LogInformation("File verified on disk: {FilePath}, Size: {FileSize} bytes", filePath, savedFileInfo.Length);
+                }
+                else
+                {
+                    _logger?.LogError("File was not found on disk after save: {FilePath}", filePath);
+                    return StatusCode(500, new { error = "File was not saved correctly", message = "File not found after save operation", path = filePath });
+                }
             }
             catch (Exception saveEx)
             {
-                _logger?.LogError(saveEx, "Error saving file to disk: {FilePath}", filePath);
+                _logger?.LogError(saveEx, "Error saving file to disk: {FilePath}, Error: {ErrorMessage}", filePath, saveEx.Message);
                 return StatusCode(500, new { error = "Error saving file to disk", message = saveEx.Message, path = filePath });
             }
 
@@ -505,11 +618,11 @@ public class FilesController : ControllerBase
                     await using var transaction = await _context.Database.BeginTransactionAsync();
                     try
                     {
-                        // Create file record
+                        // Create file record - sử dụng uniqueFileName thay vì fileName gốc
                         fileItem = new FileItem
                         {
                             AssignmentID = assignmentId,
-                            FileName = fileName,
+                            FileName = uniqueFileName, // Lưu tên file đã được đổi (nếu có)
                             FilePath = filePath,
                             FileType = fileType,
                             FileSize = file.Length,
@@ -533,15 +646,29 @@ public class FilesController : ControllerBase
 
                         // Update File_ID only for WorkItems that belong to the current user
                         // Get current user info from claims
-                        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+                        var firebaseUID = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
                             ?? User.FindFirst("sub")?.Value;
                         var currentUserName = User.Identity?.Name;
                         
                         // Try to get user from database to match with WorkItem.PersonName
                         User? currentUser = null;
-                        if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out int userId))
+                        if (!string.IsNullOrEmpty(firebaseUID))
                         {
-                            currentUser = await _context.Users.FindAsync(userId);
+                            currentUser = await _context.Users
+                                .FirstOrDefaultAsync(u => u.FirebaseUID == firebaseUID);
+                            
+                            if (currentUser == null)
+                            {
+                                // Nếu không tìm thấy theo FirebaseUID, thử tìm theo email
+                                var emailClaim = User.FindFirst(ClaimTypes.Email)?.Value 
+                                                ?? User.FindFirst("email")?.Value;
+                                
+                                if (!string.IsNullOrEmpty(emailClaim))
+                                {
+                                    currentUser = await _context.Users
+                                        .FirstOrDefaultAsync(u => u.Email == emailClaim);
+                                }
+                            }
                         }
                         
                         // Get all possible identifiers for current user
@@ -556,8 +683,8 @@ public class FilesController : ControllerBase
                         }
                         if (!string.IsNullOrEmpty(currentUserName))
                             userIdentifiers.Add(currentUserName);
-                        if (!string.IsNullOrEmpty(userIdClaim))
-                            userIdentifiers.Add(userIdClaim);
+                        if (!string.IsNullOrEmpty(firebaseUID))
+                            userIdentifiers.Add(firebaseUID);
                         
                         // Find WorkItems that belong to current user
                         var workItems = await _context.WorkItems

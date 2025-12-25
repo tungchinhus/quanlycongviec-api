@@ -26,20 +26,48 @@ public class DashboardController : ControllerBase
     {
         try
         {
-            // Lấy UserId từ JWT token
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+            // Lấy FirebaseUID từ JWT token
+            var firebaseUID = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
                              ?? User.FindFirst("sub")?.Value;
             
-            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            _logger?.LogInformation("Dashboard GetUserStats - FirebaseUID from token: {FirebaseUID}", firebaseUID ?? "NULL");
+            
+            if (string.IsNullOrEmpty(firebaseUID))
             {
+                _logger?.LogWarning("Dashboard GetUserStats - No FirebaseUID found in token");
                 return Unauthorized(new { error = "Invalid user token" });
             }
 
-            // Lấy thông tin user
-            var user = await _context.Users.FindAsync(userId);
+            // Lấy thông tin user từ FirebaseUID
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.FirebaseUID == firebaseUID);
+            
+            _logger?.LogInformation("Dashboard GetUserStats - User lookup by FirebaseUID: {Found}, UserId: {UserId}", 
+                user != null, user?.UserId);
+            
             if (user == null)
             {
-                return NotFound(new { error = "User not found" });
+                // Nếu không tìm thấy theo FirebaseUID, thử tìm theo email
+                var emailClaim = User.FindFirst(ClaimTypes.Email)?.Value 
+                                ?? User.FindFirst("email")?.Value;
+                
+                _logger?.LogInformation("Dashboard GetUserStats - Trying email lookup: {Email}", emailClaim ?? "NULL");
+                
+                if (!string.IsNullOrEmpty(emailClaim))
+                {
+                    user = await _context.Users
+                        .FirstOrDefaultAsync(u => u.Email == emailClaim);
+                    
+                    _logger?.LogInformation("Dashboard GetUserStats - User lookup by Email: {Found}, UserId: {UserId}", 
+                        user != null, user?.UserId);
+                }
+                
+                if (user == null)
+                {
+                    _logger?.LogWarning("Dashboard GetUserStats - User not found. FirebaseUID: {FirebaseUID}, Email: {Email}", 
+                        firebaseUID, emailClaim ?? "NULL");
+                    return NotFound(new { error = "User not found", firebaseUID, email = emailClaim });
+                }
             }
 
             // Lấy username để filter theo PersonName trong WorkItems

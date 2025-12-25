@@ -56,7 +56,8 @@ public class WorkItemsController : ControllerBase
                 ExpectedFinish = wi.ExpectedFinish,
                 ActualFinish = wi.ActualFinish,
                 PersonConfirmation = wi.PersonConfirmation,
-                Notes = wi.Notes
+                Notes = wi.Notes,
+                File_ID = wi.File_ID
             });
 
             return Ok(workItemDtos);
@@ -98,7 +99,8 @@ public class WorkItemsController : ControllerBase
                 ExpectedFinish = workItem.ExpectedFinish,
                 ActualFinish = workItem.ActualFinish,
                 PersonConfirmation = workItem.PersonConfirmation,
-                Notes = workItem.Notes
+                Notes = workItem.Notes,
+                File_ID = workItem.File_ID
             };
 
             return Ok(workItemDto);
@@ -306,7 +308,8 @@ public class WorkItemsController : ControllerBase
                 ExpectedFinish = workItem.ExpectedFinish,
                 ActualFinish = workItem.ActualFinish,
                 PersonConfirmation = workItem.PersonConfirmation,
-                Notes = workItem.Notes
+                Notes = workItem.Notes,
+                File_ID = workItem.File_ID
             };
 
             return Ok(workItemDto);

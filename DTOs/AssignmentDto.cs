@@ -32,6 +32,49 @@ public class CreateMachineAssignmentDto
     public string? FilePath { get; set; }
 
     public int Status { get; set; } = 1; // 1: new, 2: đang xử lý, 3: hoàn thành
+
+    // TechnicalSheet data
+    public CreateTechnicalSheetDto? TechnicalSheet { get; set; }
+}
+
+public class CreateTechnicalSheetDto
+{
+    [Required]
+    [StringLength(50)]
+    public string TBKT_ID { get; set; } = string.Empty;
+
+    public int? Power_kVA { get; set; }
+
+    [StringLength(255)]
+    public string? VoltageSpec { get; set; }
+
+    public int? Phase { get; set; }
+
+    [StringLength(100)]
+    public string? StandardCode { get; set; }
+
+    [StringLength(200)]
+    public string? Proposer { get; set; }
+
+    public DateTime? DeliveryDate { get; set; }
+
+    public DateTime? DrawingDate { get; set; }
+
+    [StringLength(100)]
+    public string? SalesOrder { get; set; }
+
+    public DateTime? HandOverDate { get; set; }
+
+    public DateTime? ArchivedDate { get; set; }
+
+    [StringLength(100)]
+    public string? RequesterElectrical { get; set; }
+
+    [StringLength(100)]
+    public string? RequesterMechanical { get; set; }
+
+    [StringLength(1000)]
+    public string? Notes { get; set; }
 }
 
 public class UpdateMachineAssignmentDto
@@ -80,9 +123,30 @@ public class MachineAssignmentDto
     public string? FilePath { get; set; }
     
     public int Status { get; set; }
+    public TechnicalSheetDto? TechnicalSheet { get; set; }
     public List<AssignmentApprovalDto>? AssignmentApprovals { get; set; }
     public List<WorkChangeDto>? WorkChanges { get; set; }
     public List<WorkItemDto>? WorkItems { get; set; }
+}
+
+public class TechnicalSheetDto
+{
+    [JsonPropertyName("tbkt_ID")]
+    public string TBKT_ID { get; set; } = string.Empty;
+    public int? Power_kVA { get; set; }
+    public string? VoltageSpec { get; set; }
+    public int? Phase { get; set; }
+    public string? StandardCode { get; set; }
+    [StringLength(200)]
+    public string? Proposer { get; set; }
+    public DateTime? DeliveryDate { get; set; }
+    public DateTime? DrawingDate { get; set; }
+    public string? Notes { get; set; }
+    public string? SalesOrder { get; set; }
+    public DateTime? HandOverDate { get; set; }
+    public DateTime? ArchivedDate { get; set; }
+    public string? RequesterElectrical { get; set; }
+    public string? RequesterMechanical { get; set; }
 }
 
 public class AssignmentApprovalDto
@@ -143,6 +207,9 @@ public class WorkItemDto
     public DateTime? ActualFinish { get; set; }
     public bool? PersonConfirmation { get; set; }
     public string? Notes { get; set; }
+    
+    [JsonPropertyName("file_ID")]
+    public string? File_ID { get; set; }
 }
 
 public class CreateWorkItemDto

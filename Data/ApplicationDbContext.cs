@@ -166,12 +166,43 @@ public class ApplicationDbContext : DbContext
         {
             entity.ToTable("TechnicalSheet");
             entity.HasKey(e => e.TBKT_ID);
-            entity.Property(e => e.TBKT_ID).IsRequired().HasMaxLength(50);
-            entity.Property(e => e.VoltageSpec).HasMaxLength(100);
-            entity.Property(e => e.Phase).HasMaxLength(50);
-            entity.Property(e => e.StandardCode).HasMaxLength(100);
-            entity.Property(e => e.Proposer).HasMaxLength(100);
-            entity.Property(e => e.Notes).HasMaxLength(1000);
+            // Explicitly configure TBKT_ID as varchar string type to prevent casting errors
+            // Match database schema: varchar(10) - but allow up to 50 for flexibility
+            entity.Property(e => e.TBKT_ID)
+                .IsRequired()
+                .HasMaxLength(50)
+                .HasColumnType("varchar(50)");
+            // Power_kVA is int? - explicitly configure as int (nullable)
+            entity.Property(e => e.Power_kVA)
+                .HasColumnType("int")
+                .IsRequired(false);
+            entity.Property(e => e.VoltageSpec)
+                .HasMaxLength(100)
+                .HasColumnType("nvarchar");
+            // Phase is int? - explicitly configure as int (nullable)
+            entity.Property(e => e.Phase)
+                .HasColumnType("int")
+                .IsRequired(false);
+            entity.Property(e => e.StandardCode)
+                .HasMaxLength(100)
+                .HasColumnType("nvarchar");
+            // Proposer is string? - stores FirebaseUID
+            entity.Property(e => e.Proposer)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar")
+                .IsRequired(false);
+            entity.Property(e => e.Notes)
+                .HasMaxLength(1000)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.SalesOrder)
+                .HasMaxLength(50)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.RequesterElectrical)
+                .HasMaxLength(100)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.RequesterMechanical)
+                .HasMaxLength(100)
+                .HasColumnType("nvarchar");
             entity.HasIndex(e => e.TBKT_ID);
         });
 

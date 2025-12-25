@@ -519,11 +519,25 @@ namespace quanlyfilesBE.Controllers;
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSection["Key"]!));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
+        // Sử dụng FirebaseUID làm identifier chính (trong sub và NameIdentifier claims)
+        // Fallback về UserId nếu FirebaseUID không có (cho backward compatibility)
+        var identifier = !string.IsNullOrEmpty(user.FirebaseUID) 
+            ? user.FirebaseUID 
+            : user.UserId.ToString();
+
         var claims = new List<Claim>
         {
-            new Claim(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
-            new Claim(ClaimTypes.Name, user.UserName)
+            new Claim(JwtRegisteredClaimNames.Sub, identifier),
+            new Claim(ClaimTypes.NameIdentifier, identifier),
+            new Claim(ClaimTypes.Name, user.UserName ?? string.Empty)
         };
+        
+        // Thêm email claim nếu có
+        if (!string.IsNullOrEmpty(user.Email))
+        {
+            claims.Add(new Claim(ClaimTypes.Email, user.Email));
+        }
+        
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
         claims.AddRange(permissions.Select(p => new Claim("permission", p)));
 

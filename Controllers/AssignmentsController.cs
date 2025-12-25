@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
+using System.Text.Json;
 
 namespace quanlyfilesBE.Controllers;
 
@@ -47,6 +48,23 @@ public class AssignmentsController : ControllerBase
                 TeamLeader = a.TeamLeader,
                 FilePath = a.FilePath,
                 Status = a.Status,
+                TechnicalSheet = a.TechnicalSheet != null ? new TechnicalSheetDto
+                {
+                    TBKT_ID = a.TechnicalSheet.TBKT_ID,
+                    Power_kVA = a.TechnicalSheet.Power_kVA,
+                    VoltageSpec = a.TechnicalSheet.VoltageSpec,
+                    Phase = a.TechnicalSheet.Phase,
+                    StandardCode = a.TechnicalSheet.StandardCode,
+                    Proposer = a.TechnicalSheet.Proposer,
+                    DeliveryDate = a.TechnicalSheet.DeliveryDate,
+                    DrawingDate = a.TechnicalSheet.DrawingDate,
+                    Notes = a.TechnicalSheet.Notes,
+                    SalesOrder = a.TechnicalSheet.SalesOrder,
+                    HandOverDate = a.TechnicalSheet.HandOverDate,
+                    ArchivedDate = a.TechnicalSheet.ArchivedDate,
+                    RequesterElectrical = a.TechnicalSheet.RequesterElectrical,
+                    RequesterMechanical = a.TechnicalSheet.RequesterMechanical
+                } : null,
                 AssignmentApprovals = a.AssignmentApprovals.Select(aa => new AssignmentApprovalDto
                 {
                     ApprovalID = aa.ApprovalID,
@@ -73,7 +91,8 @@ public class AssignmentsController : ControllerBase
                     ExpectedFinish = wi.ExpectedFinish,
                     ActualFinish = wi.ActualFinish,
                     PersonConfirmation = wi.PersonConfirmation,
-                    Notes = wi.Notes
+                    Notes = wi.Notes,
+                    File_ID = wi.File_ID
                 }).ToList()
             }).ToList();
 
@@ -116,6 +135,23 @@ public class AssignmentsController : ControllerBase
                 TeamLeader = assignment.TeamLeader,
                 FilePath = assignment.FilePath,
                 Status = assignment.Status,
+                TechnicalSheet = assignment.TechnicalSheet != null ? new TechnicalSheetDto
+                {
+                    TBKT_ID = assignment.TechnicalSheet.TBKT_ID,
+                    Power_kVA = assignment.TechnicalSheet.Power_kVA,
+                    VoltageSpec = assignment.TechnicalSheet.VoltageSpec,
+                    Phase = assignment.TechnicalSheet.Phase,
+                    StandardCode = assignment.TechnicalSheet.StandardCode,
+                    Proposer = assignment.TechnicalSheet.Proposer,
+                    DeliveryDate = assignment.TechnicalSheet.DeliveryDate,
+                    DrawingDate = assignment.TechnicalSheet.DrawingDate,
+                    Notes = assignment.TechnicalSheet.Notes,
+                    SalesOrder = assignment.TechnicalSheet.SalesOrder,
+                    HandOverDate = assignment.TechnicalSheet.HandOverDate,
+                    ArchivedDate = assignment.TechnicalSheet.ArchivedDate,
+                    RequesterElectrical = assignment.TechnicalSheet.RequesterElectrical,
+                    RequesterMechanical = assignment.TechnicalSheet.RequesterMechanical
+                } : null,
                 AssignmentApprovals = assignment.AssignmentApprovals.Select(aa => new AssignmentApprovalDto
                 {
                     ApprovalID = aa.ApprovalID,
@@ -142,7 +178,8 @@ public class AssignmentsController : ControllerBase
                     ExpectedFinish = wi.ExpectedFinish,
                     ActualFinish = wi.ActualFinish,
                     PersonConfirmation = wi.PersonConfirmation,
-                    Notes = wi.Notes
+                    Notes = wi.Notes,
+                    File_ID = wi.File_ID
                 }).ToList()
             };
 
@@ -196,7 +233,20 @@ public class AssignmentsController : ControllerBase
                         {
                             technicalSheet = new TechnicalSheet
                             {
-                                TBKT_ID = dto.TBKT_ID
+                                TBKT_ID = dto.TBKT_ID,
+                                Power_kVA = dto.TechnicalSheet?.Power_kVA,
+                                VoltageSpec = dto.TechnicalSheet?.VoltageSpec,
+                                Phase = dto.TechnicalSheet?.Phase,
+                                StandardCode = dto.TechnicalSheet?.StandardCode,
+                                Proposer = dto.TechnicalSheet?.Proposer,
+                                DeliveryDate = dto.TechnicalSheet?.DeliveryDate ?? dto.DeliveryDate,
+                                DrawingDate = dto.TechnicalSheet?.DrawingDate,
+                                SalesOrder = dto.TechnicalSheet?.SalesOrder,
+                                HandOverDate = dto.TechnicalSheet?.HandOverDate,
+                                ArchivedDate = dto.TechnicalSheet?.ArchivedDate,
+                                RequesterElectrical = dto.TechnicalSheet?.RequesterElectrical,
+                                RequesterMechanical = dto.TechnicalSheet?.RequesterMechanical,
+                                Notes = dto.TechnicalSheet?.Notes
                             };
                             _context.TechnicalSheets.Add(technicalSheet);
                             // Save TechnicalSheet first to ensure it exists before creating MachineAssignment
@@ -229,7 +279,91 @@ public class AssignmentsController : ControllerBase
                     }
                     else
                     {
-                        _logger?.LogInformation("TechnicalSheet already exists with TBKT_ID: {TBKT_ID}", dto.TBKT_ID);
+                        _logger?.LogInformation("TechnicalSheet already exists with TBKT_ID: {TBKT_ID}, updating fields", dto.TBKT_ID);
+                        // Update TechnicalSheet fields if provided
+                        bool hasUpdates = false;
+                        if (dto.TechnicalSheet != null)
+                        {
+                            if (dto.TechnicalSheet.Power_kVA.HasValue)
+                            {
+                                technicalSheet.Power_kVA = dto.TechnicalSheet.Power_kVA;
+                                hasUpdates = true;
+                            }
+                            if (!string.IsNullOrEmpty(dto.TechnicalSheet.VoltageSpec))
+                            {
+                                technicalSheet.VoltageSpec = dto.TechnicalSheet.VoltageSpec;
+                                hasUpdates = true;
+                            }
+                            if (dto.TechnicalSheet.Phase.HasValue)
+                            {
+                                technicalSheet.Phase = dto.TechnicalSheet.Phase;
+                                hasUpdates = true;
+                            }
+                            if (!string.IsNullOrEmpty(dto.TechnicalSheet.StandardCode))
+                            {
+                                technicalSheet.StandardCode = dto.TechnicalSheet.StandardCode;
+                                hasUpdates = true;
+                            }
+                            if (!string.IsNullOrEmpty(dto.TechnicalSheet.Proposer))
+                            {
+                                technicalSheet.Proposer = dto.TechnicalSheet.Proposer;
+                                hasUpdates = true;
+                            }
+                            if (dto.TechnicalSheet.DeliveryDate.HasValue)
+                            {
+                                technicalSheet.DeliveryDate = dto.TechnicalSheet.DeliveryDate;
+                                hasUpdates = true;
+                            }
+                            if (dto.TechnicalSheet.DrawingDate.HasValue)
+                            {
+                                technicalSheet.DrawingDate = dto.TechnicalSheet.DrawingDate;
+                                hasUpdates = true;
+                            }
+                            if (!string.IsNullOrEmpty(dto.TechnicalSheet.SalesOrder))
+                            {
+                                technicalSheet.SalesOrder = dto.TechnicalSheet.SalesOrder;
+                                hasUpdates = true;
+                            }
+                            if (dto.TechnicalSheet.HandOverDate.HasValue)
+                            {
+                                technicalSheet.HandOverDate = dto.TechnicalSheet.HandOverDate;
+                                hasUpdates = true;
+                            }
+                            if (dto.TechnicalSheet.ArchivedDate.HasValue)
+                            {
+                                technicalSheet.ArchivedDate = dto.TechnicalSheet.ArchivedDate;
+                                hasUpdates = true;
+                            }
+                            if (!string.IsNullOrEmpty(dto.TechnicalSheet.RequesterElectrical))
+                            {
+                                technicalSheet.RequesterElectrical = dto.TechnicalSheet.RequesterElectrical;
+                                hasUpdates = true;
+                            }
+                            if (!string.IsNullOrEmpty(dto.TechnicalSheet.RequesterMechanical))
+                            {
+                                technicalSheet.RequesterMechanical = dto.TechnicalSheet.RequesterMechanical;
+                                hasUpdates = true;
+                            }
+                            if (!string.IsNullOrEmpty(dto.TechnicalSheet.Notes))
+                            {
+                                technicalSheet.Notes = dto.TechnicalSheet.Notes;
+                                hasUpdates = true;
+                            }
+                        }
+                        
+                        // Also update DeliveryDate from assignment if TechnicalSheet DeliveryDate is null and assignment has DeliveryDate
+                        if (!technicalSheet.DeliveryDate.HasValue && dto.DeliveryDate.HasValue)
+                        {
+                            technicalSheet.DeliveryDate = dto.DeliveryDate;
+                            hasUpdates = true;
+                        }
+                        
+                        // Save TechnicalSheet updates if any
+                        if (hasUpdates)
+                        {
+                            await _context.SaveChangesAsync();
+                            _logger?.LogInformation("TechnicalSheet updated successfully with TBKT_ID: {TBKT_ID}", dto.TBKT_ID);
+                        }
                     }
 
                     assignment = new MachineAssignment
@@ -242,7 +376,8 @@ public class AssignmentsController : ControllerBase
                         Designer = dto.Designer,
                         TeamLeader = dto.TeamLeader,
                         FilePath = dto.FilePath,
-                        Status = dto.Status
+                        // Đảm bảo status mặc định là 1 (new) nếu không được set hoặc là 0
+                        Status = dto.Status > 0 ? dto.Status : 1
                     };
 
                     _context.MachineAssignments.Add(assignment);
@@ -262,6 +397,9 @@ public class AssignmentsController : ControllerBase
             });
 
             // Reload with related data
+            await _context.Entry(assignment)
+                .Reference(a => a.TechnicalSheet)
+                .LoadAsync();
             await _context.Entry(assignment)
                 .Collection(a => a.AssignmentApprovals)
                 .LoadAsync();
@@ -284,6 +422,23 @@ public class AssignmentsController : ControllerBase
                 TeamLeader = assignment.TeamLeader,
                 FilePath = assignment.FilePath,
                 Status = assignment.Status,
+                TechnicalSheet = assignment.TechnicalSheet != null ? new TechnicalSheetDto
+                {
+                    TBKT_ID = assignment.TechnicalSheet.TBKT_ID,
+                    Power_kVA = assignment.TechnicalSheet.Power_kVA,
+                    VoltageSpec = assignment.TechnicalSheet.VoltageSpec,
+                    Phase = assignment.TechnicalSheet.Phase,
+                    StandardCode = assignment.TechnicalSheet.StandardCode,
+                    Proposer = assignment.TechnicalSheet.Proposer,
+                    DeliveryDate = assignment.TechnicalSheet.DeliveryDate,
+                    DrawingDate = assignment.TechnicalSheet.DrawingDate,
+                    Notes = assignment.TechnicalSheet.Notes,
+                    SalesOrder = assignment.TechnicalSheet.SalesOrder,
+                    HandOverDate = assignment.TechnicalSheet.HandOverDate,
+                    ArchivedDate = assignment.TechnicalSheet.ArchivedDate,
+                    RequesterElectrical = assignment.TechnicalSheet.RequesterElectrical,
+                    RequesterMechanical = assignment.TechnicalSheet.RequesterMechanical
+                } : null,
                 AssignmentApprovals = new List<AssignmentApprovalDto>(),
                 WorkChanges = new List<WorkChangeDto>(),
                 WorkItems = new List<WorkItemDto>()
@@ -378,6 +533,26 @@ public class AssignmentsController : ControllerBase
     {
         try
         {
+            // #region agent log
+            _logger?.LogInformation("DEBUG: DeleteAssignment called with id={Id}", id);
+            try {
+                var logEntry = new {
+                    sessionId = "debug-session",
+                    runId = "run1",
+                    hypothesisId = "A",
+                    location = "AssignmentsController.cs:531",
+                    message = "DeleteAssignment entry",
+                    data = new { assignmentId = id },
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                await System.IO.File.AppendAllTextAsync(
+                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
+                    JsonSerializer.Serialize(logEntry) + "\n");
+            } catch (Exception logEx) {
+                _logger?.LogWarning(logEx, "DEBUG: Failed to write log file");
+            }
+            // #endregion
+
             // Load assignment với các navigation properties
             var assignment = await _context.MachineAssignments
                 .Include(a => a.AssignmentApprovals)
@@ -387,12 +562,80 @@ public class AssignmentsController : ControllerBase
 
             if (assignment == null)
             {
+                // #region agent log
+                try {
+                    var logEntry = new {
+                        sessionId = "debug-session",
+                        runId = "run1",
+                        hypothesisId = "E",
+                        location = "AssignmentsController.cs:545",
+                        message = "Assignment not found",
+                        data = new { assignmentId = id },
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    };
+                    await System.IO.File.AppendAllTextAsync(
+                        @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
+                        JsonSerializer.Serialize(logEntry) + "\n");
+                } catch { }
+                // #endregion
                 return NotFound(new { error = "Assignment not found" });
             }
 
-            // Chỉ cho phép xóa khi status = 1 (new)
+            // #region agent log
+            _logger?.LogInformation("DEBUG: Assignment loaded - ID={Id}, Status={Status}, WorkItemsCount={Count}", 
+                assignment.AssignmentID, assignment.Status, assignment.WorkItems?.Count ?? 0);
+            try {
+                var logEntry = new {
+                    sessionId = "debug-session",
+                    runId = "run1",
+                    hypothesisId = "A",
+                    location = "AssignmentsController.cs:560",
+                    message = "Assignment loaded",
+                    data = new {
+                        assignmentId = assignment.AssignmentID,
+                        status = assignment.Status,
+                        workItemsCount = assignment.WorkItems?.Count ?? 0,
+                        workItems = assignment.WorkItems?.Select(wi => new {
+                            workItemId = wi.WorkItemID,
+                            startDate = wi.StartDate?.ToString("yyyy-MM-dd"),
+                            expectedFinish = wi.ExpectedFinish?.ToString("yyyy-MM-dd"),
+                            actualFinish = wi.ActualFinish?.ToString("yyyy-MM-dd"),
+                            personConfirmation = wi.PersonConfirmation,
+                            notes = wi.Notes ?? "null",
+                            notesIsNullOrWhiteSpace = string.IsNullOrWhiteSpace(wi.Notes),
+                            fileId = wi.File_ID ?? "null",
+                            fileIdIsNullOrWhiteSpace = string.IsNullOrWhiteSpace(wi.File_ID)
+                        }).ToList()
+                    },
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                await System.IO.File.AppendAllTextAsync(
+                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
+                    JsonSerializer.Serialize(logEntry) + "\n");
+            } catch (Exception logEx) {
+                _logger?.LogWarning(logEx, "DEBUG: Failed to write log file");
+            }
+            // #endregion
+
+            // Chỉ cho phép xóa khi status = 0 hoặc 1 (new/trạng thái mới)
             int currentStatus = assignment.Status;
-            if (currentStatus != 1)
+            // #region agent log
+            try {
+                var logEntry = new {
+                    sessionId = "debug-session",
+                    runId = "run1",
+                    hypothesisId = "A",
+                    location = "AssignmentsController.cs:575",
+                    message = "Status check before validation",
+                    data = new { currentStatus, statusCheckPass = (currentStatus == 0 || currentStatus == 1) },
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                await System.IO.File.AppendAllTextAsync(
+                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
+                    JsonSerializer.Serialize(logEntry) + "\n");
+            } catch { }
+            // #endregion
+            if (currentStatus != 0 && currentStatus != 1)
             {
                 string statusText = currentStatus switch
                 {
@@ -400,7 +643,114 @@ public class AssignmentsController : ControllerBase
                     3 => "hoàn thành",
                     _ => $"không xác định ({currentStatus})"
                 };
-                return BadRequest(new { error = "Cannot delete assignment", message = $"Chỉ có thể xóa giao việc ở trạng thái 'new' (status = 1). Giao việc đang ở trạng thái '{statusText}' (status = {currentStatus}) không thể xóa." });
+                // #region agent log
+                try {
+                    var logEntry = new {
+                        sessionId = "debug-session",
+                        runId = "run1",
+                        hypothesisId = "A",
+                        location = "AssignmentsController.cs:590",
+                        message = "Status check failed",
+                        data = new { currentStatus, statusText },
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    };
+                    await System.IO.File.AppendAllTextAsync(
+                        @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
+                        JsonSerializer.Serialize(logEntry) + "\n");
+                } catch { }
+                // #endregion
+                return BadRequest(new { error = "Cannot delete assignment", message = $"Chỉ có thể xóa giao việc ở trạng thái 'new' (status = 0 hoặc 1). Giao việc đang ở trạng thái '{statusText}' (status = {currentStatus}) không thể xóa." });
+            }
+
+            // Kiểm tra xem có work item nào đã được cập nhật chưa
+            // Work item được coi là đã cập nhật nếu có bất kỳ trường nào: StartDate, ExpectedFinish, ActualFinish, PersonConfirmation, Notes, File_ID
+            // #region agent log
+            try {
+                var workItemsDetails = (assignment.WorkItems ?? Enumerable.Empty<WorkItem>()).Select(wi => new {
+                    workItemId = wi.WorkItemID,
+                    hasStartDate = wi.StartDate.HasValue,
+                    hasExpectedFinish = wi.ExpectedFinish.HasValue,
+                    hasActualFinish = wi.ActualFinish.HasValue,
+                    hasPersonConfirmation = wi.PersonConfirmation.HasValue,
+                    notesValue = wi.Notes ?? "null",
+                    notesIsNullOrWhiteSpace = string.IsNullOrWhiteSpace(wi.Notes),
+                    notesCheck = !string.IsNullOrWhiteSpace(wi.Notes),
+                    fileIdValue = wi.File_ID ?? "null",
+                    fileIdIsNullOrWhiteSpace = string.IsNullOrWhiteSpace(wi.File_ID),
+                    fileIdCheck = !string.IsNullOrWhiteSpace(wi.File_ID),
+                    isUpdated = wi.StartDate.HasValue || 
+                                wi.ExpectedFinish.HasValue || 
+                                wi.ActualFinish.HasValue || 
+                                wi.PersonConfirmation.HasValue || 
+                                !string.IsNullOrWhiteSpace(wi.Notes) || 
+                                !string.IsNullOrWhiteSpace(wi.File_ID)
+                }).ToList();
+                var logEntry = new {
+                    sessionId = "debug-session",
+                    runId = "run1",
+                    hypothesisId = "B,C,D",
+                    location = "AssignmentsController.cs:600",
+                    message = "WorkItems check before validation",
+                    data = new { workItemsCount = assignment.WorkItems?.Count ?? 0, workItemsDetails },
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                await System.IO.File.AppendAllTextAsync(
+                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
+                    JsonSerializer.Serialize(logEntry) + "\n");
+            } catch (Exception logEx) {
+                _logger?.LogWarning(logEx, "DEBUG: Failed to write log file");
+            }
+            // #endregion
+            // Kiểm tra null và empty collection
+            // Work item được coi là "đã cập nhật" nếu có bất kỳ trường nào có giá trị thực tế
+            // Chỉ kiểm tra các trường quan trọng, bỏ qua WorkType và PersonName vì chúng có thể có giá trị mặc định
+            bool hasUpdatedWorkItems = assignment.WorkItems != null && assignment.WorkItems.Any(wi => 
+                wi.StartDate.HasValue || 
+                wi.ExpectedFinish.HasValue || 
+                wi.ActualFinish.HasValue || 
+                wi.PersonConfirmation.HasValue || 
+                (!string.IsNullOrWhiteSpace(wi.Notes) && wi.Notes.Trim().Length > 0) || 
+                (!string.IsNullOrWhiteSpace(wi.File_ID) && wi.File_ID.Trim().Length > 0)
+            );
+
+            // #region agent log
+            _logger?.LogInformation("DEBUG: WorkItems check - hasUpdatedWorkItems={HasUpdated}", hasUpdatedWorkItems);
+            try {
+                var logEntry = new {
+                    sessionId = "debug-session",
+                    runId = "run1",
+                    hypothesisId = "B,C,D",
+                    location = "AssignmentsController.cs:620",
+                    message = "WorkItems check result",
+                    data = new { hasUpdatedWorkItems },
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                await System.IO.File.AppendAllTextAsync(
+                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
+                    JsonSerializer.Serialize(logEntry) + "\n");
+            } catch (Exception logEx) {
+                _logger?.LogWarning(logEx, "DEBUG: Failed to write log file");
+            }
+            // #endregion
+            if (hasUpdatedWorkItems)
+            {
+                // #region agent log
+                try {
+                    var logEntry = new {
+                        sessionId = "debug-session",
+                        runId = "run1",
+                        hypothesisId = "B,C,D",
+                        location = "AssignmentsController.cs:625",
+                        message = "WorkItems check failed - deletion blocked",
+                        data = new { hasUpdatedWorkItems },
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    };
+                    await System.IO.File.AppendAllTextAsync(
+                        @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
+                        JsonSerializer.Serialize(logEntry) + "\n");
+                } catch { }
+                // #endregion
+                return BadRequest(new { error = "Cannot delete assignment", message = "Không thể xóa giao việc này vì đã có công việc con được cập nhật (đã có ngày bắt đầu, ngày hoàn thành dự kiến, ngày hoàn thành thực tế, xác nhận, ghi chú hoặc file đính kèm). Chỉ có thể xóa giao việc mới chưa có công việc con nào được cập nhật." });
             }
 
             // Xóa các Files liên quan trước (cần xóa file vật lý trên disk)
@@ -441,14 +791,47 @@ public class AssignmentsController : ControllerBase
             {
                 _context.WorkChanges.RemoveRange(assignment.WorkChanges);
             }
-            if (assignment.WorkItems.Any())
+            if (assignment.WorkItems != null && assignment.WorkItems.Any())
             {
                 _context.WorkItems.RemoveRange(assignment.WorkItems);
             }
 
             // Xóa assignment và save changes lần cuối
+            // #region agent log
+            try {
+                var logEntry = new {
+                    sessionId = "debug-session",
+                    runId = "run1",
+                    hypothesisId = "ALL",
+                    location = "AssignmentsController.cs:650",
+                    message = "All checks passed - proceeding with deletion",
+                    data = new { assignmentId = assignment.AssignmentID },
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                await System.IO.File.AppendAllTextAsync(
+                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
+                    JsonSerializer.Serialize(logEntry) + "\n");
+            } catch { }
+            // #endregion
             _context.MachineAssignments.Remove(assignment);
             await _context.SaveChangesAsync();
+
+            // #region agent log
+            try {
+                var logEntry = new {
+                    sessionId = "debug-session",
+                    runId = "run1",
+                    hypothesisId = "ALL",
+                    location = "AssignmentsController.cs:660",
+                    message = "Deletion successful",
+                    data = new { assignmentId = id },
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                await System.IO.File.AppendAllTextAsync(
+                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
+                    JsonSerializer.Serialize(logEntry) + "\n");
+            } catch { }
+            // #endregion
 
             return NoContent();
         }
@@ -552,7 +935,8 @@ public class AssignmentsController : ControllerBase
                 ExpectedFinish = workItem.ExpectedFinish,
                 ActualFinish = workItem.ActualFinish,
                 PersonConfirmation = workItem.PersonConfirmation,
-                Notes = workItem.Notes
+                Notes = workItem.Notes,
+                File_ID = workItem.File_ID
             };
 
             return CreatedAtAction(nameof(GetAssignment), new { id = id }, workItemDto);
@@ -616,20 +1000,35 @@ public class AssignmentsController : ControllerBase
             // Kiểm tra nếu user là admin - admin có quyền xem tất cả work items
             var isAdmin = RoleHelper.IsAdministrator(User);
             
-            // Lấy UserId từ JWT token
-            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
+            // Lấy FirebaseUID từ JWT token
+            var firebaseUID = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
                 ?? User.FindFirst("sub")?.Value;
             
-            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+            if (string.IsNullOrEmpty(firebaseUID))
             {
                 return Unauthorized(new { error = "Invalid user token" });
             }
 
-            // Lấy thông tin user từ database
-            var user = await _context.Users.FindAsync(userId);
+            // Lấy thông tin user từ database bằng FirebaseUID
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.FirebaseUID == firebaseUID);
+            
             if (user == null)
             {
-                return NotFound(new { error = "User not found" });
+                // Nếu không tìm thấy theo FirebaseUID, thử tìm theo email
+                var emailClaim = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value 
+                                ?? User.FindFirst("email")?.Value;
+                
+                if (!string.IsNullOrEmpty(emailClaim))
+                {
+                    user = await _context.Users
+                        .FirstOrDefaultAsync(u => u.Email == emailClaim);
+                }
+                
+                if (user == null)
+                {
+                    return NotFound(new { error = "User not found" });
+                }
             }
 
             List<WorkItemRawData> workItemsData;
@@ -655,7 +1054,7 @@ public class AssignmentsController : ControllerBase
             {
                 // Tìm work items theo PersonName
                 // PersonName có thể là: UserId (string), FullName, hoặc UserName
-                var userIdString = userId.ToString();
+                var userIdString = user.UserId.ToString();
                 
                 // Query work items using raw SQL to handle PersonConfirmation type conversion
                 // This avoids InvalidCastException when database has string instead of bit

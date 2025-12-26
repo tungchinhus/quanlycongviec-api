@@ -4,7 +4,6 @@ using Microsoft.EntityFrameworkCore;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
-using System.Text.Json;
 
 namespace quanlyfilesBE.Controllers;
 
@@ -533,26 +532,6 @@ public class AssignmentsController : ControllerBase
     {
         try
         {
-            // #region agent log
-            _logger?.LogInformation("DEBUG: DeleteAssignment called with id={Id}", id);
-            try {
-                var logEntry = new {
-                    sessionId = "debug-session",
-                    runId = "run1",
-                    hypothesisId = "A",
-                    location = "AssignmentsController.cs:531",
-                    message = "DeleteAssignment entry",
-                    data = new { assignmentId = id },
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
-                await System.IO.File.AppendAllTextAsync(
-                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
-                    JsonSerializer.Serialize(logEntry) + "\n");
-            } catch (Exception logEx) {
-                _logger?.LogWarning(logEx, "DEBUG: Failed to write log file");
-            }
-            // #endregion
-
             // Load assignment với các navigation properties
             var assignment = await _context.MachineAssignments
                 .Include(a => a.AssignmentApprovals)
@@ -562,79 +541,11 @@ public class AssignmentsController : ControllerBase
 
             if (assignment == null)
             {
-                // #region agent log
-                try {
-                    var logEntry = new {
-                        sessionId = "debug-session",
-                        runId = "run1",
-                        hypothesisId = "E",
-                        location = "AssignmentsController.cs:545",
-                        message = "Assignment not found",
-                        data = new { assignmentId = id },
-                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                    };
-                    await System.IO.File.AppendAllTextAsync(
-                        @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
-                        JsonSerializer.Serialize(logEntry) + "\n");
-                } catch { }
-                // #endregion
                 return NotFound(new { error = "Assignment not found" });
             }
 
-            // #region agent log
-            _logger?.LogInformation("DEBUG: Assignment loaded - ID={Id}, Status={Status}, WorkItemsCount={Count}", 
-                assignment.AssignmentID, assignment.Status, assignment.WorkItems?.Count ?? 0);
-            try {
-                var logEntry = new {
-                    sessionId = "debug-session",
-                    runId = "run1",
-                    hypothesisId = "A",
-                    location = "AssignmentsController.cs:560",
-                    message = "Assignment loaded",
-                    data = new {
-                        assignmentId = assignment.AssignmentID,
-                        status = assignment.Status,
-                        workItemsCount = assignment.WorkItems?.Count ?? 0,
-                        workItems = assignment.WorkItems?.Select(wi => new {
-                            workItemId = wi.WorkItemID,
-                            startDate = wi.StartDate?.ToString("yyyy-MM-dd"),
-                            expectedFinish = wi.ExpectedFinish?.ToString("yyyy-MM-dd"),
-                            actualFinish = wi.ActualFinish?.ToString("yyyy-MM-dd"),
-                            personConfirmation = wi.PersonConfirmation,
-                            notes = wi.Notes ?? "null",
-                            notesIsNullOrWhiteSpace = string.IsNullOrWhiteSpace(wi.Notes),
-                            fileId = wi.File_ID ?? "null",
-                            fileIdIsNullOrWhiteSpace = string.IsNullOrWhiteSpace(wi.File_ID)
-                        }).ToList()
-                    },
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
-                await System.IO.File.AppendAllTextAsync(
-                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
-                    JsonSerializer.Serialize(logEntry) + "\n");
-            } catch (Exception logEx) {
-                _logger?.LogWarning(logEx, "DEBUG: Failed to write log file");
-            }
-            // #endregion
-
             // Chỉ cho phép xóa khi status = 0 hoặc 1 (new/trạng thái mới)
             int currentStatus = assignment.Status;
-            // #region agent log
-            try {
-                var logEntry = new {
-                    sessionId = "debug-session",
-                    runId = "run1",
-                    hypothesisId = "A",
-                    location = "AssignmentsController.cs:575",
-                    message = "Status check before validation",
-                    data = new { currentStatus, statusCheckPass = (currentStatus == 0 || currentStatus == 1) },
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
-                await System.IO.File.AppendAllTextAsync(
-                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
-                    JsonSerializer.Serialize(logEntry) + "\n");
-            } catch { }
-            // #endregion
             if (currentStatus != 0 && currentStatus != 1)
             {
                 string statusText = currentStatus switch
@@ -643,113 +554,22 @@ public class AssignmentsController : ControllerBase
                     3 => "hoàn thành",
                     _ => $"không xác định ({currentStatus})"
                 };
-                // #region agent log
-                try {
-                    var logEntry = new {
-                        sessionId = "debug-session",
-                        runId = "run1",
-                        hypothesisId = "A",
-                        location = "AssignmentsController.cs:590",
-                        message = "Status check failed",
-                        data = new { currentStatus, statusText },
-                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                    };
-                    await System.IO.File.AppendAllTextAsync(
-                        @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
-                        JsonSerializer.Serialize(logEntry) + "\n");
-                } catch { }
-                // #endregion
                 return BadRequest(new { error = "Cannot delete assignment", message = $"Chỉ có thể xóa giao việc ở trạng thái 'new' (status = 0 hoặc 1). Giao việc đang ở trạng thái '{statusText}' (status = {currentStatus}) không thể xóa." });
             }
 
             // Kiểm tra xem có work item nào đã được cập nhật chưa
             // Work item được coi là đã cập nhật nếu có bất kỳ trường nào: StartDate, ExpectedFinish, ActualFinish, PersonConfirmation, Notes, File_ID
-            // #region agent log
-            try {
-                var workItemsDetails = (assignment.WorkItems ?? Enumerable.Empty<WorkItem>()).Select(wi => new {
-                    workItemId = wi.WorkItemID,
-                    hasStartDate = wi.StartDate.HasValue,
-                    hasExpectedFinish = wi.ExpectedFinish.HasValue,
-                    hasActualFinish = wi.ActualFinish.HasValue,
-                    hasPersonConfirmation = wi.PersonConfirmation.HasValue,
-                    notesValue = wi.Notes ?? "null",
-                    notesIsNullOrWhiteSpace = string.IsNullOrWhiteSpace(wi.Notes),
-                    notesCheck = !string.IsNullOrWhiteSpace(wi.Notes),
-                    fileIdValue = wi.File_ID ?? "null",
-                    fileIdIsNullOrWhiteSpace = string.IsNullOrWhiteSpace(wi.File_ID),
-                    fileIdCheck = !string.IsNullOrWhiteSpace(wi.File_ID),
-                    isUpdated = wi.StartDate.HasValue || 
-                                wi.ExpectedFinish.HasValue || 
-                                wi.ActualFinish.HasValue || 
-                                wi.PersonConfirmation.HasValue || 
-                                !string.IsNullOrWhiteSpace(wi.Notes) || 
-                                !string.IsNullOrWhiteSpace(wi.File_ID)
-                }).ToList();
-                var logEntry = new {
-                    sessionId = "debug-session",
-                    runId = "run1",
-                    hypothesisId = "B,C,D",
-                    location = "AssignmentsController.cs:600",
-                    message = "WorkItems check before validation",
-                    data = new { workItemsCount = assignment.WorkItems?.Count ?? 0, workItemsDetails },
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
-                await System.IO.File.AppendAllTextAsync(
-                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
-                    JsonSerializer.Serialize(logEntry) + "\n");
-            } catch (Exception logEx) {
-                _logger?.LogWarning(logEx, "DEBUG: Failed to write log file");
-            }
-            // #endregion
-            // Kiểm tra null và empty collection
-            // Work item được coi là "đã cập nhật" nếu có bất kỳ trường nào có giá trị thực tế
-            // Chỉ kiểm tra các trường quan trọng, bỏ qua WorkType và PersonName vì chúng có thể có giá trị mặc định
-            bool hasUpdatedWorkItems = assignment.WorkItems != null && assignment.WorkItems.Any(wi => 
+            bool hasUpdatedWorkItems = assignment.WorkItems.Any(wi => 
                 wi.StartDate.HasValue || 
                 wi.ExpectedFinish.HasValue || 
                 wi.ActualFinish.HasValue || 
                 wi.PersonConfirmation.HasValue || 
-                (!string.IsNullOrWhiteSpace(wi.Notes) && wi.Notes.Trim().Length > 0) || 
-                (!string.IsNullOrWhiteSpace(wi.File_ID) && wi.File_ID.Trim().Length > 0)
+                !string.IsNullOrWhiteSpace(wi.Notes) || 
+                !string.IsNullOrWhiteSpace(wi.File_ID)
             );
 
-            // #region agent log
-            _logger?.LogInformation("DEBUG: WorkItems check - hasUpdatedWorkItems={HasUpdated}", hasUpdatedWorkItems);
-            try {
-                var logEntry = new {
-                    sessionId = "debug-session",
-                    runId = "run1",
-                    hypothesisId = "B,C,D",
-                    location = "AssignmentsController.cs:620",
-                    message = "WorkItems check result",
-                    data = new { hasUpdatedWorkItems },
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
-                await System.IO.File.AppendAllTextAsync(
-                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
-                    JsonSerializer.Serialize(logEntry) + "\n");
-            } catch (Exception logEx) {
-                _logger?.LogWarning(logEx, "DEBUG: Failed to write log file");
-            }
-            // #endregion
             if (hasUpdatedWorkItems)
             {
-                // #region agent log
-                try {
-                    var logEntry = new {
-                        sessionId = "debug-session",
-                        runId = "run1",
-                        hypothesisId = "B,C,D",
-                        location = "AssignmentsController.cs:625",
-                        message = "WorkItems check failed - deletion blocked",
-                        data = new { hasUpdatedWorkItems },
-                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                    };
-                    await System.IO.File.AppendAllTextAsync(
-                        @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
-                        JsonSerializer.Serialize(logEntry) + "\n");
-                } catch { }
-                // #endregion
                 return BadRequest(new { error = "Cannot delete assignment", message = "Không thể xóa giao việc này vì đã có công việc con được cập nhật (đã có ngày bắt đầu, ngày hoàn thành dự kiến, ngày hoàn thành thực tế, xác nhận, ghi chú hoặc file đính kèm). Chỉ có thể xóa giao việc mới chưa có công việc con nào được cập nhật." });
             }
 
@@ -791,47 +611,14 @@ public class AssignmentsController : ControllerBase
             {
                 _context.WorkChanges.RemoveRange(assignment.WorkChanges);
             }
-            if (assignment.WorkItems != null && assignment.WorkItems.Any())
+            if (assignment.WorkItems.Any())
             {
                 _context.WorkItems.RemoveRange(assignment.WorkItems);
             }
 
             // Xóa assignment và save changes lần cuối
-            // #region agent log
-            try {
-                var logEntry = new {
-                    sessionId = "debug-session",
-                    runId = "run1",
-                    hypothesisId = "ALL",
-                    location = "AssignmentsController.cs:650",
-                    message = "All checks passed - proceeding with deletion",
-                    data = new { assignmentId = assignment.AssignmentID },
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
-                await System.IO.File.AppendAllTextAsync(
-                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
-                    JsonSerializer.Serialize(logEntry) + "\n");
-            } catch { }
-            // #endregion
             _context.MachineAssignments.Remove(assignment);
             await _context.SaveChangesAsync();
-
-            // #region agent log
-            try {
-                var logEntry = new {
-                    sessionId = "debug-session",
-                    runId = "run1",
-                    hypothesisId = "ALL",
-                    location = "AssignmentsController.cs:660",
-                    message = "Deletion successful",
-                    data = new { assignmentId = id },
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
-                await System.IO.File.AppendAllTextAsync(
-                    @"d:\Project\thibidi\quanlyfiles\quanlyfileFE\.cursor\debug.log",
-                    JsonSerializer.Serialize(logEntry) + "\n");
-            } catch { }
-            // #endregion
 
             return NoContent();
         }

@@ -49,7 +49,6 @@ public class TechnicalSheetsController : ControllerBase
             var userRoles = User?.Claims?.Where(c => c.Type == ClaimTypes.Role || c.Type == "role" || c.Type == "http://schemas.microsoft.com/ws/2008/06/identity/claims/role")
                 .Select(c => c.Value)
                 .ToList() ?? new List<string>();
-            
             _logger?.LogInformation("GetAll: IsAdminOrManager: {IsAdminOrManager}, UserRoles: {UserRoles}", 
                 isAdminOrManager, string.Join(", ", userRoles));
             
@@ -674,191 +673,17 @@ public class TechnicalSheetsController : ControllerBase
             }
 
             // Check if there are any MachineAssignments using this TechnicalSheet
-            List<MachineAssignment> assignmentsToDelete = new List<MachineAssignment>();
             if (sheet.MachineAssignments != null && sheet.MachineAssignments.Any())
             {
-                // Load WorkItems for each assignment and check if they can be deleted
-                var assignmentsCannotDelete = new List<object>();
-                
-                foreach (var assignment in sheet.MachineAssignments)
-                {
-                    await _context.Entry(assignment)
-                        .Collection(a => a.WorkItems)
-                        .LoadAsync();
-                    
-                    var hasUpdatedWorkItems = assignment.WorkItems != null && assignment.WorkItems.Any(wi => 
-                        wi.StartDate.HasValue || 
-                        wi.ExpectedFinish.HasValue || 
-                        wi.ActualFinish.HasValue || 
-                        wi.PersonConfirmation.HasValue || 
-                        (!string.IsNullOrWhiteSpace(wi.Notes) && wi.Notes.Trim().Length > 0) || 
-                        (!string.IsNullOrWhiteSpace(wi.File_ID) && wi.File_ID.Trim().Length > 0)
-                    );
-                    
-                    var canDelete = (assignment.Status == 0 || assignment.Status == 1) && !hasUpdatedWorkItems;
-                    
-                    if (canDelete)
-                    {
-                        assignmentsToDelete.Add(assignment);
-                    }
-                    else
-                    {
-                        assignmentsCannotDelete.Add(new {
-                            assignmentId = assignment.AssignmentID,
-                            status = assignment.Status,
-                            statusText = assignment.Status switch {
-                                0 => "new",
-                                1 => "new", 
-                                2 => "đang xử lý",
-                                3 => "hoàn thành",
-                                _ => $"không xác định ({assignment.Status})"
-                            },
-                            workItemsCount = assignment.WorkItems?.Count ?? 0,
-                            hasUpdatedWorkItems = hasUpdatedWorkItems,
-                            canDelete = false
-                        });
-                    }
-                }
-                
-                // If there are assignments that cannot be deleted, return error
-                if (assignmentsCannotDelete.Any())
-                {
-                    var errorMessage = $"Cannot delete TechnicalSheet with TBKT_ID '{tbktId}' because it is being used by {assignmentsCannotDelete.Count} assignment(s) that cannot be deleted (status not 'new' or have updated work items).";
-                    
-                    return BadRequest(new { 
-                        message = errorMessage,
-                        assignments = assignmentsCannotDelete
-                    });
-                }
-                
-                // If all assignments can be deleted, delete them automatically (cascade delete)
-                if (assignmentsToDelete.Any())
-                {
-                    _logger?.LogInformation("Auto-deleting {Count} deletable assignment(s) for TechnicalSheet {TBKT_ID}", 
-                        assignmentsToDelete.Count, tbktId);
-                    
-                    // Use execution strategy to support retries with transaction
-                    var strategy = _context.Database.CreateExecutionStrategy();
-                    await strategy.ExecuteAsync(async () =>
-                    {
-                        await using var transaction = await _context.Database.BeginTransactionAsync();
-                        try
-                        {
-                            var assignmentIds = assignmentsToDelete.Select(a => a.AssignmentID).ToList();
-                            
-                            // Delete Files first (separate query to avoid tracking issues)
-                            var allRelatedFiles = await _context.Files
-                                .Where(f => f.AssignmentID.HasValue && assignmentIds.Contains(f.AssignmentID.Value))
-                                .ToListAsync();
-                            
-                            foreach (var file in allRelatedFiles)
-                            {
-                                if (System.IO.File.Exists(file.FilePath))
-                                {
-                                    try
-                                    {
-                                        System.IO.File.Delete(file.FilePath);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger?.LogWarning(ex, "Could not delete physical file: {FilePath}", file.FilePath);
-                                    }
-                                }
-                            }
-                            
-                            if (allRelatedFiles.Any())
-                            {
-                                _context.Files.RemoveRange(allRelatedFiles);
-                                await _context.SaveChangesAsync();
-                            }
-                            
-                            // Delete WorkItems (cascade should handle this, but explicit for safety)
-                            var allWorkItems = await _context.WorkItems
-                                .Where(wi => assignmentIds.Contains(wi.AssignmentID))
-                                .ToListAsync();
-                            
-                            if (allWorkItems.Any())
-                            {
-                                _context.WorkItems.RemoveRange(allWorkItems);
-                                await _context.SaveChangesAsync();
-                            }
-                            
-                            // Delete AssignmentApprovals
-                            var allApprovals = await _context.AssignmentApprovals
-                                .Where(aa => assignmentIds.Contains(aa.AssignmentID))
-                                .ToListAsync();
-                            
-                            if (allApprovals.Any())
-                            {
-                                _context.AssignmentApprovals.RemoveRange(allApprovals);
-                                await _context.SaveChangesAsync();
-                            }
-                            
-                            // Delete WorkChanges
-                            var allWorkChanges = await _context.WorkChanges
-                                .Where(wc => assignmentIds.Contains(wc.AssignmentID))
-                                .ToListAsync();
-                            
-                            if (allWorkChanges.Any())
-                            {
-                                _context.WorkChanges.RemoveRange(allWorkChanges);
-                                await _context.SaveChangesAsync();
-                            }
-                            
-                            // Finally delete assignments
-                            _context.MachineAssignments.RemoveRange(assignmentsToDelete);
-                            await _context.SaveChangesAsync();
-                            
-                            // Commit transaction
-                            await transaction.CommitAsync();
-                            
-                            _logger?.LogInformation("Successfully auto-deleted {Count} assignment(s) for TechnicalSheet {TBKT_ID}", 
-                                assignmentsToDelete.Count, tbktId);
-                        }
-                        catch (Exception ex)
-                        {
-                            await transaction.RollbackAsync();
-                            _logger?.LogError(ex, "Error auto-deleting assignments for TechnicalSheet {TBKT_ID}: {Message}", tbktId, ex.Message);
-                            if (ex.InnerException != null)
-                            {
-                                _logger?.LogError("Inner exception: {InnerMessage}", ex.InnerException.Message);
-                            }
-                            throw;
-                        }
-                    });
-                }
-            }
-
-            // KHÔNG xóa TechnicalSheet - chỉ xóa assignments và related data nếu có
-            // TechnicalSheet sẽ được giữ lại
-            if (assignmentsToDelete.Any())
-            {
-                return Ok(new { 
-                    message = $"Successfully deleted {assignmentsToDelete.Count} assignment(s) and related data for TechnicalSheet with TBKT_ID '{tbktId}'. TechnicalSheet is kept.",
-                    deletedAssignmentsCount = assignmentsToDelete.Count
+                return BadRequest(new { 
+                    message = $"Cannot delete TechnicalSheet with TBKT_ID '{tbktId}' because it is being used by {sheet.MachineAssignments.Count} assignment(s). Please delete the assignments first." 
                 });
             }
-            
-            // Nếu không có assignments nào, trả về thông báo
-            return Ok(new { 
-                message = $"TechnicalSheet with TBKT_ID '{tbktId}' has no assignments to delete. TechnicalSheet is kept.",
-                deletedAssignmentsCount = 0
-            });
-        }
-        catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx)
-        {
-            var errorMsg = $"Database error deleting TechnicalSheet with TBKT_ID: {tbktId}";
-            var innerMessage = dbEx.InnerException?.Message ?? dbEx.Message;
-            _logger?.LogError(dbEx, errorMsg);
-            _logger?.LogError("Inner exception: {InnerMessage}", innerMessage);
-            var additionalInfo = $"TBKT_ID: {tbktId}, Request Path: {Request.Path}, Method: {Request.Method}, Inner: {innerMessage}";
-            await _fileLogger.LogErrorAsync(errorMsg, dbEx, additionalInfo);
-            return StatusCode(500, new { 
-                error = "Error deleting TechnicalSheet", 
-                message = "An error occurred while saving the entity changes. See the inner exception for details.",
-                details = innerMessage,
-                fullException = dbEx.ToString()
-            });
+
+            _context.TechnicalSheets.Remove(sheet);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
         }
         catch (Exception ex)
         {

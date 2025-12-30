@@ -17,6 +17,8 @@ public class ApplicationDbContext : DbContext
     public DbSet<Permission> Permissions { get; set; }
     public DbSet<UserRole> UserRoles { get; set; }
     public DbSet<RolePermission> RolePermissions { get; set; }
+    public DbSet<PagePermission> PagePermissions { get; set; }
+    public DbSet<UserPagePermission> UserPagePermissions { get; set; }
     public DbSet<Setting> Settings { get; set; }
     public DbSet<TechnicalSheet> TechnicalSheets { get; set; }
     public DbSet<MachineAssignment> MachineAssignments { get; set; }
@@ -24,6 +26,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<WorkChange> WorkChanges { get; set; }
     public DbSet<WorkItem> WorkItems { get; set; }
     public DbSet<TechnicalNotification> TechnicalNotifications { get; set; }
+    public DbSet<Notification> Notifications { get; set; }
     public DbSet<TSMay> TSMay { get; set; }
     public DbSet<ApprovalWorkflow> ApprovalWorkflows { get; set; }
 
@@ -494,6 +497,73 @@ public class ApplicationDbContext : DbContext
             entity.HasIndex(e => e.ApproverFirebaseUID);
             entity.HasIndex(e => e.OverallStatus);
             entity.HasIndex(e => e.RequestReferenceID);
+        });
+
+        // Notification
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.ToTable("Notifications");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                .HasColumnType("int");
+            entity.Property(e => e.UserId)
+                .IsRequired()
+                .HasMaxLength(200);
+            entity.Property(e => e.Title)
+                .IsRequired()
+                .HasMaxLength(200);
+            entity.Property(e => e.Message)
+                .IsRequired()
+                .HasMaxLength(1000);
+            entity.Property(e => e.Type)
+                .IsRequired()
+                .HasMaxLength(50)
+                .HasDefaultValue("info");
+            entity.Property(e => e.IsRead)
+                .HasDefaultValue(false);
+            entity.Property(e => e.CreatedAt)
+                .IsRequired();
+            entity.Property(e => e.RelatedEntityType)
+                .HasMaxLength(100);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.IsRead);
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // PagePermission
+        modelBuilder.Entity<PagePermission>(entity =>
+        {
+            entity.ToTable("PagePermissions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                .HasColumnType("int");
+            entity.Property(e => e.PageRoute)
+                .IsRequired()
+                .HasMaxLength(200);
+            entity.Property(e => e.PageName)
+                .IsRequired()
+                .HasMaxLength(200);
+            entity.Property(e => e.Description)
+                .HasMaxLength(500);
+            entity.HasIndex(e => e.PageRoute).IsUnique();
+        });
+
+        // UserPagePermission
+        modelBuilder.Entity<UserPagePermission>(entity =>
+        {
+            entity.ToTable("UserPagePermissions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                .HasColumnType("int");
+            entity.HasIndex(e => new { e.UserId, e.PagePermissionId }).IsUnique();
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.PagePermission)
+                .WithMany(p => p.UserPagePermissions)
+                .HasForeignKey(e => e.PagePermissionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Seed initial admin role and permission if table is empty at migration time handled separately

@@ -26,3 +26,14 @@ public class ValidatePathResponseDto
     public string? ErrorMessage { get; set; }
 }
 
+public class SystemSettingsDto
+{
+    public string FileStoragePath { get; set; } = string.Empty;
+    public bool SendEmailNotifications { get; set; } = true; // Default to email notifications
+}
+
+public class UpdateNotificationSettingsDto
+{
+    public bool SendEmailNotifications { get; set; }
+}
+

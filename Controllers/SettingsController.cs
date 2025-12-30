@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
+using quanlyfilesBE.Data;
 using System.IO;
 
 namespace quanlyfilesBE.Controllers;
@@ -13,11 +15,16 @@ namespace quanlyfilesBE.Controllers;
 public class SettingsController : ControllerBase
 {
     private readonly FileStorageOptions _fileStorageOptions;
+    private readonly ApplicationDbContext _context;
     private readonly ILogger<SettingsController>? _logger;
 
-    public SettingsController(IOptions<FileStorageOptions> fileStorageOptions, ILogger<SettingsController>? logger = null)
+    public SettingsController(
+        IOptions<FileStorageOptions> fileStorageOptions,
+        ApplicationDbContext context,
+        ILogger<SettingsController>? logger = null)
     {
         _fileStorageOptions = fileStorageOptions.Value;
+        _context = context;
         _logger = logger;
     }
 
@@ -53,11 +60,19 @@ public class SettingsController : ControllerBase
     // GET: api/settings/file-storage-path
     [HttpGet("file-storage-path")]
     [Authorize(Roles = "Administrator,Admin")]
-    public IActionResult GetFileStoragePath()
+    public async Task<IActionResult> GetFileStoragePath()
     {
         try
         {
-            return Ok(new { path = _fileStorageOptions.Path });
+            // Check database first, then fall back to appsettings.json
+            var pathSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "file-storage-path");
+            
+            var fileStoragePath = pathSetting != null 
+                ? pathSetting.Value 
+                : _fileStorageOptions.Path;
+
+            return Ok(new { fileStoragePath });
         }
         catch (Exception ex)
         {
@@ -69,7 +84,7 @@ public class SettingsController : ControllerBase
     // PUT: api/settings/file-storage-path
     [HttpPut("file-storage-path")]
     [Authorize(Roles = "Administrator,Admin")]
-    public IActionResult UpdateFileStoragePath([FromBody] UpdateFileStoragePathDto updateDto)
+    public async Task<IActionResult> UpdateFileStoragePath([FromBody] UpdateFileStoragePathDto updateDto)
     {
         try
         {
@@ -78,20 +93,44 @@ public class SettingsController : ControllerBase
                 return BadRequest(new { error = "Path is required" });
             }
 
+            var trimmedPath = updateDto.Path.Trim();
+
             // Validate path
-            var validationResult = ValidatePathInternal(updateDto.Path);
+            var validationResult = ValidatePathInternal(trimmedPath);
             if (!validationResult.IsValid)
             {
                 return BadRequest(new { error = validationResult.ErrorMessage });
             }
 
-            // Return information that path needs to be updated in appsettings.json
-            return BadRequest(new 
-            { 
-                error = "File storage path is configured in appsettings.json. Please update the 'FileStorage:Path' setting in appsettings.json and restart the application.",
-                currentPath = _fileStorageOptions.Path,
-                requestedPath = updateDto.Path.Trim()
-            });
+            // Store in database (this overrides appsettings.json)
+            var pathSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "file-storage-path");
+
+            if (pathSetting == null)
+            {
+                // Create new setting
+                pathSetting = new Setting
+                {
+                    Key = "file-storage-path",
+                    Value = trimmedPath,
+                    Description = "File storage path on the server (overrides appsettings.json)",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _context.Settings.Add(pathSetting);
+            }
+            else
+            {
+                // Update existing setting
+                pathSetting.Value = trimmedPath;
+                pathSetting.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
+
+            _logger?.LogInformation("File storage path updated to: {Path}", trimmedPath);
+
+            return Ok(new { fileStoragePath = trimmedPath, message = "File storage path updated successfully" });
         }
         catch (Exception ex)
         {
@@ -109,23 +148,25 @@ public class SettingsController : ControllerBase
         {
             if (string.IsNullOrWhiteSpace(validateDto.Path))
             {
-                return BadRequest(new ValidatePathResponseDto
-                {
-                    IsValid = false,
-                    ErrorMessage = "Path is required"
+                return BadRequest(new { 
+                    valid = false, 
+                    message = "Path is required" 
                 });
             }
 
             var validationResult = ValidatePathInternal(validateDto.Path);
-            return Ok(validationResult);
+            // Map to frontend expected format
+            return Ok(new { 
+                valid = validationResult.IsValid, 
+                message = validationResult.ErrorMessage 
+            });
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error in ValidatePath: {Message}", ex.Message);
-            return StatusCode(500, new ValidatePathResponseDto
-            {
-                IsValid = false,
-                ErrorMessage = $"Error validating path: {ex.Message}"
+            return StatusCode(500, new { 
+                valid = false, 
+                message = $"Error validating path: {ex.Message}" 
             });
         }
     }
@@ -213,6 +254,112 @@ public class SettingsController : ControllerBase
                 IsValid = false,
                 ErrorMessage = $"Error validating path: {ex.Message}"
             };
+        }
+    }
+
+    // GET: api/settings/all
+    [HttpGet("all")]
+    [Authorize(Roles = "Administrator,Admin")]
+    public async Task<IActionResult> GetAllSystemSettings()
+    {
+        try
+        {
+            // Get file storage path from database first, then fall back to appsettings.json
+            var pathSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "file-storage-path");
+            
+            var fileStoragePath = pathSetting != null 
+                ? pathSetting.Value 
+                : _fileStorageOptions.Path;
+
+            // Get notification setting from database
+            var notificationSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "send-email-notifications");
+            
+            var sendEmailNotifications = true; // Default to true
+            if (notificationSetting != null)
+            {
+                bool.TryParse(notificationSetting.Value, out sendEmailNotifications);
+            }
+
+            var settings = new SystemSettingsDto
+            {
+                FileStoragePath = fileStoragePath,
+                SendEmailNotifications = sendEmailNotifications
+            };
+
+            return Ok(settings);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in GetAllSystemSettings: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error retrieving system settings", message = ex.Message });
+        }
+    }
+
+    // GET: api/settings/notification-preference
+    [HttpGet("notification-preference")]
+    [Authorize]
+    public async Task<IActionResult> GetNotificationPreference()
+    {
+        try
+        {
+            var notificationSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "send-email-notifications");
+            
+            var sendEmailNotifications = true; // Default to true
+            if (notificationSetting != null)
+            {
+                bool.TryParse(notificationSetting.Value, out sendEmailNotifications);
+            }
+
+            return Ok(new { sendEmailNotifications });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in GetNotificationPreference: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error retrieving notification preference", message = ex.Message });
+        }
+    }
+
+    // PUT: api/settings/notification-preference
+    [HttpPut("notification-preference")]
+    [Authorize(Roles = "Administrator,Admin")]
+    public async Task<IActionResult> UpdateNotificationPreference([FromBody] UpdateNotificationSettingsDto updateDto)
+    {
+        try
+        {
+            var notificationSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "send-email-notifications");
+
+            if (notificationSetting == null)
+            {
+                // Create new setting
+                notificationSetting = new Setting
+                {
+                    Key = "send-email-notifications",
+                    Value = updateDto.SendEmailNotifications.ToString(),
+                    Description = "If true, send email notifications. If false, show notification badge on bell icon.",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _context.Settings.Add(notificationSetting);
+            }
+            else
+            {
+                // Update existing setting
+                notificationSetting.Value = updateDto.SendEmailNotifications.ToString();
+                notificationSetting.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new { sendEmailNotifications = updateDto.SendEmailNotifications });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in UpdateNotificationPreference: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error updating notification preference", message = ex.Message });
         }
     }
 }

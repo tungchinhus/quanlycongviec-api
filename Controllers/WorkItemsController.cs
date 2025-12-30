@@ -1,9 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
+using quanlyfilesBE.Services;
+using quanlyfilesBE.Hubs;
 
 namespace quanlyfilesBE.Controllers;
 
@@ -13,11 +16,19 @@ namespace quanlyfilesBE.Controllers;
 public class WorkItemsController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
+    private readonly IPowerAutomateService? _powerAutomateService;
+    private readonly IHubContext<NotificationHub>? _hubContext;
     private readonly ILogger<WorkItemsController>? _logger;
 
-    public WorkItemsController(ApplicationDbContext context, ILogger<WorkItemsController>? logger = null)
+    public WorkItemsController(
+        ApplicationDbContext context, 
+        IPowerAutomateService? powerAutomateService = null,
+        IHubContext<NotificationHub>? hubContext = null,
+        ILogger<WorkItemsController>? logger = null)
     {
         _context = context;
+        _powerAutomateService = powerAutomateService;
+        _hubContext = hubContext;
         _logger = logger;
         _logger?.LogInformation("WorkItemsController initialized");
     }
@@ -118,6 +129,7 @@ public class WorkItemsController : ControllerBase
     {
         // Use execution strategy to support retries with transaction
         WorkItem? workItem = null;
+        MachineAssignment? assignment = null;
         var strategy = _context.Database.CreateExecutionStrategy();
         
         try
@@ -128,7 +140,7 @@ public class WorkItemsController : ControllerBase
                 try
                 {
                     // Validate assignment exists
-                    var assignment = await _context.MachineAssignments.FindAsync(dto.AssignmentID);
+                    assignment = await _context.MachineAssignments.FindAsync(dto.AssignmentID);
                     if (assignment == null)
                     {
                         await transaction.RollbackAsync();
@@ -174,9 +186,20 @@ public class WorkItemsController : ControllerBase
             });
 
             // Check if assignment was found
-            if (workItem == null)
+            if (workItem == null || assignment == null)
             {
                 return NotFound(new { error = "Assignment not found" });
+            }
+
+            // Handle notification for assigned user
+            try
+            {
+                await HandleWorkItemAssignmentNotificationAsync(workItem, assignment);
+            }
+            catch (Exception notifEx)
+            {
+                // Log but don't fail the work item creation if notification fails
+                _logger?.LogWarning(notifEx, "Failed to send notification for work item assignment: {Message}", notifEx.Message);
             }
 
             var workItemDto = new WorkItemDto
@@ -292,7 +315,36 @@ public class WorkItemsController : ControllerBase
                         workItem.Notes = dto.Notes;
                     }
 
-                    // Save changes
+                    // Save changes first to get updated work item state
+                    await _context.SaveChangesAsync();
+
+                    // Nếu work item đã hoàn thành (ActualFinish != null), xóa notification
+                    if (workItem.ActualFinish.HasValue)
+                    {
+                        var notifications = await _context.Notifications
+                            .Where(n => 
+                                n.RelatedEntityType == "WorkItem" && 
+                                n.RelatedEntityId == workItem.WorkItemID)
+                            .ToListAsync();
+                        
+                        if (notifications.Any())
+                        {
+                            var userIds = notifications.Select(n => n.UserId).Distinct().ToList();
+                            _context.Notifications.RemoveRange(notifications);
+                            _logger?.LogInformation("Deleted {Count} notification(s) because work item {WorkItemID} is completed", notifications.Count, workItem.WorkItemID);
+                            
+                            // Gửi SignalR notification để client update
+                            if (_hubContext != null)
+                            {
+                                foreach (var userId in userIds)
+                                {
+                                    await _hubContext.Clients.Group($"user_{userId}").SendAsync("NotificationRemoved", new { workItemId = workItem.WorkItemID });
+                                    await _hubContext.Clients.Group($"user_{userId}").SendAsync("UnreadCountChanged");
+                                }
+                            }
+                        }
+                    }
+
                     await _context.SaveChangesAsync();
                     await transaction.CommitAsync();
                     
@@ -409,6 +461,110 @@ public class WorkItemsController : ControllerBase
         {
             _logger?.LogError(ex, "Error in DeleteWorkItem: {Message}", ex.Message);
             return StatusCode(500, new { error = "Error deleting work item", message = ex.Message });
+        }
+    }
+
+    private async Task HandleWorkItemAssignmentNotificationAsync(WorkItem workItem, MachineAssignment assignment)
+    {
+        if (string.IsNullOrWhiteSpace(workItem.PersonName))
+        {
+            _logger?.LogWarning("WorkItem {WorkItemID} has no PersonName, skipping notification", workItem.WorkItemID);
+            return;
+        }
+
+        // Find user by PersonName (could be UserName, FullName, or UserId)
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u => 
+                u.UserName == workItem.PersonName || 
+                u.FullName == workItem.PersonName ||
+                u.UserId.ToString() == workItem.PersonName);
+
+        if (user == null || string.IsNullOrEmpty(user.FirebaseUID))
+        {
+            _logger?.LogWarning("User not found for PersonName: {PersonName}, skipping notification", workItem.PersonName);
+            return;
+        }
+
+        // Get notification preference from settings
+        var notificationSetting = await _context.Settings
+            .FirstOrDefaultAsync(s => s.Key == "send-email-notifications");
+        
+        var sendEmailNotifications = true; // Default to email
+        if (notificationSetting != null)
+        {
+            bool.TryParse(notificationSetting.Value, out sendEmailNotifications);
+        }
+
+        if (sendEmailNotifications)
+        {
+            // Send email notification
+            if (_powerAutomateService != null && !string.IsNullOrEmpty(user.Email))
+            {
+                var subject = $"Bạn đã được giao công việc mới: {assignment.MachineName}";
+                var body = $@"
+                    <h2>Bạn đã được giao công việc mới</h2>
+                    <p><strong>Tên máy:</strong> {assignment.MachineName}</p>
+                    <p><strong>Loại công việc:</strong> {workItem.WorkType}</p>
+                    <p><strong>Ngày bắt đầu:</strong> {workItem.StartDate:dd/MM/yyyy}</p>
+                    <p><strong>Dự kiến hoàn thành:</strong> {workItem.ExpectedFinish:dd/MM/yyyy}</p>
+                    {(string.IsNullOrEmpty(workItem.Notes) ? "" : $"<p><strong>Ghi chú:</strong> {workItem.Notes}</p>")}
+                ";
+
+                // Create a minimal ApprovalWorkflowDto for email
+                var workflowDto = new ApprovalWorkflowDto
+                {
+                    WorkflowID = 0,
+                    RequestTitle = $"Công việc mới: {assignment.MachineName}",
+                    RequesterName = workItem.PersonName,
+                    RequesterEmail = user.Email
+                };
+
+                await _powerAutomateService.SendNotificationEmailAsync(
+                    user.Email,
+                    subject,
+                    body,
+                    workflowDto);
+            }
+        }
+        else
+        {
+            // Get TBKT_ID from assignment
+            var assignmentWithTBKT = await _context.MachineAssignments
+                .Include(a => a.TechnicalSheet)
+                .FirstOrDefaultAsync(a => a.AssignmentID == assignment.AssignmentID);
+            
+            var tbktId = assignmentWithTBKT?.TechnicalSheet?.TBKT_ID ?? "N/A";
+            
+            // Create notification badge - chỉ hiển thị TBKT_ID
+            var notification = new Notification
+            {
+                UserId = user.FirebaseUID,
+                Title = "Bạn đã được giao công việc mới",
+                Message = tbktId,
+                Type = "info",
+                IsRead = false,
+                CreatedAt = DateTime.UtcNow,
+                RelatedEntityType = "WorkItem",
+                RelatedEntityId = workItem.WorkItemID
+            };
+
+            _context.Notifications.Add(notification);
+            await _context.SaveChangesAsync();
+            _logger?.LogInformation("Created notification for user {FirebaseUID} about work item {WorkItemID}", user.FirebaseUID, workItem.WorkItemID);
+            
+            // Gửi SignalR notification
+            if (_hubContext != null)
+            {
+                await _hubContext.Clients.Group($"user_{user.FirebaseUID}").SendAsync("NewNotification", new 
+                { 
+                    id = notification.Id,
+                    title = notification.Title,
+                    message = notification.Message,
+                    type = notification.Type,
+                    createdAt = notification.CreatedAt
+                });
+                await _hubContext.Clients.Group($"user_{user.FirebaseUID}").SendAsync("UnreadCountChanged");
+            }
         }
     }
 }

@@ -63,7 +63,7 @@ builder.Services.AddCors(options =>
                 "http://localsite.thibidi.com",  // Production frontend
                 "http://localhost:4200"           // Development Angular default port
             )
-            .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")  // Explicit methods
+            .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "CONNECT")  // Explicit methods (CONNECT for SignalR)
             .WithHeaders(
                 "Content-Type",
                 "Authorization",
@@ -145,6 +145,9 @@ builder.Services.AddSingleton<quanlyfilesBE.Services.IFileLoggerService, quanlyf
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<quanlyfilesBE.Services.IPowerAutomateService, quanlyfilesBE.Services.PowerAutomateService>();
 
+// Add SignalR
+builder.Services.AddSignalR();
+
 // Configure FileStorage options
 builder.Services.Configure<FileStorageOptions>(
     builder.Configuration.GetSection(FileStorageOptions.SectionName));
@@ -202,7 +205,22 @@ if (app.Environment.IsDevelopment())
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Log all incoming requests for debugging
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path;
+    var method = context.Request.Method;
+    if (path.Value?.Contains("page-permissions") == true)
+    {
+        Console.WriteLine($"[PagePermissions Debug] {method} {path}");
+    }
+    await next();
+});
+
 app.MapControllers();
+
+// Map SignalR Hub
+app.MapHub<quanlyfilesBE.Hubs.NotificationHub>("/notificationHub");
 
 // Add root route
 app.MapGet("/", () => {

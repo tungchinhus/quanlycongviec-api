@@ -7,6 +7,7 @@ using System.Security.Claims;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
 using quanlyfilesBE.Data;
+using quanlyfilesBE.Services;
 
 namespace quanlyfilesBE.Controllers;
 
@@ -17,15 +18,18 @@ public class FilesController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
     private readonly FileStorageOptions _fileStorageOptions;
+    private readonly IPowerAutomateService? _powerAutomateService;
     private readonly ILogger<FilesController>? _logger;
 
     public FilesController(
         ApplicationDbContext context, 
         IOptions<FileStorageOptions> fileStorageOptions,
+        IPowerAutomateService? powerAutomateService = null,
         ILogger<FilesController>? logger = null)
     {
         _context = context;
         _fileStorageOptions = fileStorageOptions.Value;
+        _powerAutomateService = powerAutomateService;
         _logger = logger;
     }
 
@@ -475,7 +479,112 @@ public class FilesController : ControllerBase
         _logger?.LogWarning("Could not get username from claims or database. FirebaseUID: {FirebaseUID}, IdentityName: {IdentityName}", 
             firebaseUID, User.Identity?.Name);
         
-        return "Unknown";
+            return "Unknown";
+    }
+
+    private async Task<string> GetFileStoragePathAsync()
+    {
+        // Check database first, then fall back to appsettings.json
+        var pathSetting = await _context.Settings
+            .FirstOrDefaultAsync(s => s.Key == "file-storage-path");
+        
+        var fileStoragePath = pathSetting != null 
+            ? pathSetting.Value 
+            : _fileStorageOptions.Path;
+
+        // If still empty, use default
+        if (string.IsNullOrWhiteSpace(fileStoragePath))
+        {
+            fileStoragePath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads");
+        }
+
+        return fileStoragePath;
+    }
+
+    private async Task HandleFileUploadNotificationAsync(FileItem fileItem, MachineAssignment assignment, string uploadedBy)
+    {
+        // Get notification preference from settings
+        var notificationSetting = await _context.Settings
+            .FirstOrDefaultAsync(s => s.Key == "send-email-notifications");
+        
+        var sendEmailNotifications = true; // Default to email
+        if (notificationSetting != null)
+        {
+            bool.TryParse(notificationSetting.Value, out sendEmailNotifications);
+        }
+
+        // Get current user info for notifications
+        var firebaseUID = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+            ?? User.FindFirst("sub")?.Value;
+        var currentUser = await _context.Users
+            .FirstOrDefaultAsync(u => u.FirebaseUID == firebaseUID);
+
+        if (sendEmailNotifications)
+        {
+            // Send email notification
+            if (_powerAutomateService != null && currentUser != null && !string.IsNullOrEmpty(currentUser.Email))
+            {
+                var subject = $"File đã được upload: {fileItem.FileName}";
+                var body = $@"
+                    <h2>File đã được upload thành công</h2>
+                    <p><strong>File:</strong> {fileItem.FileName}</p>
+                    <p><strong>Kích thước:</strong> {FormatFileSize(fileItem.FileSize)}</p>
+                    <p><strong>Người upload:</strong> {uploadedBy}</p>
+                    <p><strong>Máy:</strong> {assignment.MachineName}</p>
+                    <p><strong>Ngày upload:</strong> {fileItem.UploadDate:dd/MM/yyyy HH:mm}</p>
+                    {(string.IsNullOrEmpty(fileItem.Description) ? "" : $"<p><strong>Mô tả:</strong> {fileItem.Description}</p>")}
+                ";
+
+                // Create a minimal ApprovalWorkflowDto for email
+                var workflowDto = new ApprovalWorkflowDto
+                {
+                    WorkflowID = 0,
+                    RequestTitle = $"File upload: {fileItem.FileName}",
+                    RequesterName = uploadedBy,
+                    RequesterEmail = currentUser.Email
+                };
+
+                await _powerAutomateService.SendNotificationEmailAsync(
+                    currentUser.Email,
+                    subject,
+                    body,
+                    workflowDto);
+            }
+        }
+        else
+        {
+            // Create notification badge
+            if (!string.IsNullOrEmpty(firebaseUID))
+            {
+                var notification = new Notification
+                {
+                    UserId = firebaseUID,
+                    Title = "File đã được upload",
+                    Message = $"File '{fileItem.FileName}' đã được upload thành công cho máy {assignment.MachineName}",
+                    Type = "success",
+                    IsRead = false,
+                    CreatedAt = DateTime.UtcNow,
+                    RelatedEntityType = "File",
+                    RelatedEntityId = fileItem.Id
+                };
+
+                _context.Notifications.Add(notification);
+                await _context.SaveChangesAsync();
+            }
+        }
+    }
+
+    private string FormatFileSize(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB" };
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len = len / 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
     }
 
     // POST: api/Files/upload
@@ -516,12 +625,8 @@ public class FilesController : ControllerBase
                 return BadRequest(new { error = "File size exceeds maximum allowed size (50MB)" });
             }
 
-            // Get storage path
-            var baseStoragePath = _fileStorageOptions.Path;
-            if (string.IsNullOrWhiteSpace(baseStoragePath))
-            {
-                baseStoragePath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads");
-            }
+            // Get storage path (from database or appsettings.json)
+            var baseStoragePath = await GetFileStoragePathAsync();
 
             // Lấy username của user đang đăng nhập và tạo folder theo username
             var currentUsername = await GetCurrentUsernameAsync();
@@ -742,6 +847,18 @@ public class FilesController : ControllerBase
                 {
                     _logger?.LogError("fileItem is null after successful execution strategy run.");
                     return StatusCode(500, new { error = "Error uploading file", message = "fileItem not created" });
+                }
+
+                // Handle notifications based on system settings
+                try
+                {
+                    // Không tạo notification khi upload file
+                    // await HandleFileUploadNotificationAsync(fileItem, assignment, currentUsername);
+                }
+                catch (Exception notifEx)
+                {
+                    // Log but don't fail the upload if notification fails
+                    _logger?.LogWarning(notifEx, "Failed to send notification for file upload: {Message}", notifEx.Message);
                 }
 
                 // Create response after successful commit

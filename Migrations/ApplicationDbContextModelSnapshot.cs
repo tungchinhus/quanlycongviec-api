@@ -801,6 +801,63 @@ namespace quanlyfilesBE.Migrations
                     b.ToTable("WorkItem", (string)null);
                 });
 
+            modelBuilder.Entity("quanlyfilesBE.Models.Notification", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsRead")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("RelatedEntityId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RelatedEntityType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasDefaultValue("info");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("IsRead");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("Notifications", (string)null);
+                });
+
             modelBuilder.Entity("quanlyfilesBE.Models.AssignmentApproval", b =>
                 {
                     b.HasOne("quanlyfilesBE.Models.MachineAssignment", "MachineAssignment")

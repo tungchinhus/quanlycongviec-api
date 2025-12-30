@@ -141,6 +141,10 @@ builder.Services.AddScoped<quanlyfilesBE.Services.IFirebaseService, quanlyfilesB
 // Register File Logger Service
 builder.Services.AddSingleton<quanlyfilesBE.Services.IFileLoggerService, quanlyfilesBE.Services.FileLoggerService>();
 
+// Register Power Automate Service
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<quanlyfilesBE.Services.IPowerAutomateService, quanlyfilesBE.Services.PowerAutomateService>();
+
 // Configure FileStorage options
 builder.Services.Configure<FileStorageOptions>(
     builder.Configuration.GetSection(FileStorageOptions.SectionName));

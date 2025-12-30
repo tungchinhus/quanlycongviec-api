@@ -7,6 +7,7 @@ using quanlyfilesBE.Data;
 using quanlyfilesBE.Services;
 using System.Linq;
 using System.Security.Claims;
+using System.Text.Json;
 
 namespace quanlyfilesBE.Controllers;
 
@@ -44,7 +45,7 @@ public class TechnicalSheetsController : ControllerBase
             _logger?.LogInformation("GetAll: User authenticated: {IsAuthenticated}, UserName: {UserName}", 
                 isAuthenticated, userName);
             
-            // Kiểm tra xem user có phải admin hoặc manager không
+            // Kiểm tra xem user có phải admin hoặc manager không (bao gồm managerL, managerL1, managerL2)
             var isAdminOrManager = RoleHelper.IsAdministratorOrManager(User);
             var userRoles = User?.Claims?.Where(c => c.Type == ClaimTypes.Role || c.Type == "role" || c.Type == "http://schemas.microsoft.com/ws/2008/06/identity/claims/role")
                 .Select(c => c.Value)
@@ -52,19 +53,79 @@ public class TechnicalSheetsController : ControllerBase
             _logger?.LogInformation("GetAll: IsAdminOrManager: {IsAdminOrManager}, UserRoles: {UserRoles}", 
                 isAdminOrManager, string.Join(", ", userRoles));
             
+            // #region agent log
+            try {
+                var logPath = @"c:\MyData\projects\quanlyfiles\quanlyfileFE\.cursor\debug.log";
+                var logEntry = JsonSerializer.Serialize(new {
+                    id = $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_A",
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    location = "TechnicalSheetsController.cs:48",
+                    message = "Role check result",
+                    data = new { isAdminOrManager, userRoles = string.Join(", ", userRoles), firebaseUIDParam = firebaseUID ?? "NULL" },
+                    sessionId = "debug-session",
+                    runId = "run1",
+                    hypothesisId = "A"
+                });
+                await System.IO.File.AppendAllTextAsync(logPath, logEntry + "\n");
+            } catch {}
+            // #endregion
+            
+            // Logic phân quyền:
+            // - User thường: chỉ xem được danh sách đề nghị do chính họ tạo (Proposer = FirebaseUID của họ)
+            // - Manager (managerL, managerL1, managerL2): xem được tất cả đề nghị, bỏ qua firebaseUID parameter
+            
             // Lấy FirebaseUID từ token của user hiện tại
             var currentUserFirebaseUID = User?.FindFirst(ClaimTypes.NameIdentifier)?.Value 
                 ?? User?.FindFirst("sub")?.Value;
             
+            // #region agent log
+            try {
+                var logPath = @"c:\MyData\projects\quanlyfiles\quanlyfileFE\.cursor\debug.log";
+                var logEntry = JsonSerializer.Serialize(new {
+                    id = $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_D",
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    location = "TechnicalSheetsController.cs:60",
+                    message = "Current user FirebaseUID extracted",
+                    data = new { currentUserFirebaseUID = currentUserFirebaseUID ?? "NULL", firebaseUIDParam = firebaseUID ?? "NULL" },
+                    sessionId = "debug-session",
+                    runId = "run1",
+                    hypothesisId = "D"
+                });
+                await System.IO.File.AppendAllTextAsync(logPath, logEntry + "\n");
+            } catch {}
+            // #endregion
+            
             string? filterFirebaseUID = null;
             
-            // Nếu có firebaseUID parameter
-            if (!string.IsNullOrEmpty(firebaseUID))
+            // Nếu là Manager: bỏ qua firebaseUID parameter, luôn trả về tất cả
+            if (isAdminOrManager)
             {
-                // Nếu không phải admin/manager, chỉ cho phép filter theo firebaseUID của chính họ
-                if (!isAdminOrManager)
+                _logger?.LogInformation("GetAll: User is Admin/Manager, ignoring firebaseUID parameter, will return all TechnicalSheets");
+                filterFirebaseUID = null; // Không filter, trả về tất cả
+                
+                // #region agent log
+                try {
+                    var logPath = @"c:\MyData\projects\quanlyfiles\quanlyfileFE\.cursor\debug.log";
+                    var logEntry = JsonSerializer.Serialize(new {
+                        id = $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_B",
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        location = "TechnicalSheetsController.cs:69",
+                        message = "Manager branch: filterFirebaseUID set to null",
+                        data = new { isAdminOrManager, filterFirebaseUID = filterFirebaseUID ?? "NULL", firebaseUIDParam = firebaseUID ?? "NULL" },
+                        sessionId = "debug-session",
+                        runId = "run1",
+                        hypothesisId = "B"
+                    });
+                    await System.IO.File.AppendAllTextAsync(logPath, logEntry + "\n");
+                } catch {}
+                // #endregion
+            }
+            else
+            {
+                // User thường: chỉ xem được danh sách của chính họ
+                if (!string.IsNullOrEmpty(firebaseUID))
                 {
-                    // So sánh firebaseUID từ parameter với firebaseUID từ token
+                    // User thường: chỉ cho phép filter theo firebaseUID của chính họ
                     if (string.IsNullOrEmpty(currentUserFirebaseUID) || currentUserFirebaseUID != firebaseUID)
                     {
                         _logger?.LogWarning("GetAll: User {CurrentFirebaseUID} tried to filter by firebaseUID {RequestedFirebaseUID} but is not admin/manager. Access denied.", 
@@ -75,16 +136,13 @@ public class TechnicalSheetsController : ControllerBase
                             message = "Bạn chỉ có thể xem đề nghị của chính mình. Chỉ Admin/Manager mới có thể filter theo user khác." 
                         });
                     }
+                    
+                    filterFirebaseUID = firebaseUID;
+                    _logger?.LogInformation("GetAll: User thường - Filtering by firebaseUID parameter: {FirebaseUID}", filterFirebaseUID);
                 }
-                
-                filterFirebaseUID = firebaseUID;
-                _logger?.LogInformation("GetAll: Filtering by firebaseUID parameter: {FirebaseUID}", filterFirebaseUID);
-            }
-            else
-            {
-                // Nếu không có firebaseUID parameter, lấy từ user hiện tại
-                if (!isAdminOrManager)
+                else
                 {
+                    // User thường: không có firebaseUID parameter, tự động filter theo FirebaseUID của chính họ
                     if (string.IsNullOrEmpty(currentUserFirebaseUID))
                     {
                         _logger?.LogWarning("GetAll: User not found in token. Returning empty list.");
@@ -92,12 +150,25 @@ public class TechnicalSheetsController : ControllerBase
                     }
                     
                     filterFirebaseUID = currentUserFirebaseUID;
-                    _logger?.LogInformation("GetAll: No firebaseUID parameter, using current user FirebaseUID: {FirebaseUID}", filterFirebaseUID);
+                    _logger?.LogInformation("GetAll: User thường - No firebaseUID parameter, using current user FirebaseUID: {FirebaseUID}", filterFirebaseUID);
                 }
-                else
-                {
-                    _logger?.LogInformation("GetAll: User is Admin/Manager, no firebaseUID parameter, will return all TechnicalSheets");
-                }
+                
+                // #region agent log
+                try {
+                    var logPath = @"c:\MyData\projects\quanlyfiles\quanlyfileFE\.cursor\debug.log";
+                    var logEntry = JsonSerializer.Serialize(new {
+                        id = $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_E",
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        location = "TechnicalSheetsController.cs:103",
+                        message = "Regular user branch: filterFirebaseUID set",
+                        data = new { isAdminOrManager, filterFirebaseUID = filterFirebaseUID ?? "NULL", currentUserFirebaseUID = currentUserFirebaseUID ?? "NULL", firebaseUIDParam = firebaseUID ?? "NULL" },
+                        sessionId = "debug-session",
+                        runId = "run1",
+                        hypothesisId = "E"
+                    });
+                    await System.IO.File.AppendAllTextAsync(logPath, logEntry + "\n");
+                } catch {}
+                // #endregion
             }
             
             // Try to fetch data with explicit type handling
@@ -124,15 +195,49 @@ public class TechnicalSheetsController : ControllerBase
                 }
                 else
                 {
-                    // Admin/Manager: trả về tất cả TechnicalSheets (bao gồm cả Proposer = NULL)
+                    // Manager (managerL, managerL1, managerL2): trả về tất cả TechnicalSheets (bao gồm cả Proposer = NULL)
                     _logger?.LogInformation("GetAll: User is Admin/Manager, returning all TechnicalSheets (including NULL Proposer)");
                 }
+                
+                // #region agent log
+                try {
+                    var logPath = @"c:\MyData\projects\quanlyfiles\quanlyfileFE\.cursor\debug.log";
+                    var logEntry = JsonSerializer.Serialize(new {
+                        id = $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_C",
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        location = "TechnicalSheetsController.cs:133",
+                        message = "Query filter state before execution",
+                        data = new { isAdminOrManager, filterFirebaseUID = filterFirebaseUID ?? "NULL", willFilter = !string.IsNullOrEmpty(filterFirebaseUID) },
+                        sessionId = "debug-session",
+                        runId = "run1",
+                        hypothesisId = "C"
+                    });
+                    await System.IO.File.AppendAllTextAsync(logPath, logEntry + "\n");
+                } catch {}
+                // #endregion
                 
                 sheets = await query
                     .OrderBy(x => x.TBKT_ID)
                     .ToListAsync();
                 
                 _logger?.LogInformation("GetAll: Retrieved {Count} TechnicalSheets from database", sheets.Count);
+                
+                // #region agent log
+                try {
+                    var logPath = @"c:\MyData\projects\quanlyfiles\quanlyfileFE\.cursor\debug.log";
+                    var logEntry = JsonSerializer.Serialize(new {
+                        id = $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_FINAL",
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        location = "TechnicalSheetsController.cs:137",
+                        message = "Final result count",
+                        data = new { isAdminOrManager, filterFirebaseUID = filterFirebaseUID ?? "NULL", resultCount = sheets.Count },
+                        sessionId = "debug-session",
+                        runId = "run1",
+                        hypothesisId = "C"
+                    });
+                    await System.IO.File.AppendAllTextAsync(logPath, logEntry + "\n");
+                } catch {}
+                // #endregion
             }
             catch (Exception dbEx)
             {
@@ -149,6 +254,7 @@ public class TechnicalSheetsController : ControllerBase
                     var whereClause = "TBKT_ID IS NOT NULL AND TBKT_ID != ''";
                     
                     // Thêm filter theo FirebaseUID nếu có (Proposer lưu trực tiếp FirebaseUID)
+                    // Manager: bỏ qua filterFirebaseUID, trả về tất cả
                     if (!string.IsNullOrEmpty(filterFirebaseUID))
                     {
                         var trimmedFilterUID = filterFirebaseUID.Trim().Replace("'", "''");
@@ -157,9 +263,14 @@ public class TechnicalSheetsController : ControllerBase
                     }
                     else if (!isAdminOrManager)
                     {
-                        // Nếu không phải admin/manager và không có filterFirebaseUID, trả về danh sách rỗng
+                        // User thường: nếu không có filterFirebaseUID, trả về danh sách rỗng
                         _logger?.LogWarning("GetAll (SQL fallback): User is not admin/manager and no firebaseUID provided. Returning empty list.");
                         return Ok(new List<TechnicalSheetDto>());
+                    }
+                    else
+                    {
+                        // Manager: không filter, trả về tất cả
+                        _logger?.LogInformation("GetAll (SQL fallback): User is Admin/Manager, returning all TechnicalSheets");
                     }
                     
                     var rawSql = $@"

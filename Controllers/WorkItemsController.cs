@@ -148,6 +148,14 @@ public class WorkItemsController : ControllerBase
                     };
 
                     _context.WorkItems.Add(workItem);
+                    
+                    // Khi user tạo work item với xác nhận (PersonConfirmation = true), cập nhật trạng thái giao việc thành 2 (đang xử lý)
+                    if (dto.PersonConfirmation == true && assignment.Status == 1)
+                    {
+                        assignment.Status = 2; // 2: đang xử lý
+                        _logger?.LogInformation("Updated MachineAssignment {AssignmentID} status from 1 to 2 after creating work item with confirmation", assignment.AssignmentID);
+                    }
+                    
                     await _context.SaveChangesAsync();
                     await transaction.CommitAsync();
                 }
@@ -264,6 +272,19 @@ public class WorkItemsController : ControllerBase
                     if (dto.PersonConfirmation.HasValue)
                     {
                         workItem.PersonConfirmation = dto.PersonConfirmation.Value;
+                        
+                        // Khi user xác nhận (PersonConfirmation = true), cập nhật trạng thái giao việc thành 2 (đang xử lý)
+                        if (dto.PersonConfirmation.Value == true)
+                        {
+                            var assignment = await _context.MachineAssignments
+                                .FirstOrDefaultAsync(a => a.AssignmentID == workItem.AssignmentID);
+                            
+                            if (assignment != null && assignment.Status == 1)
+                            {
+                                assignment.Status = 2; // 2: đang xử lý
+                                _logger?.LogInformation("Updated MachineAssignment {AssignmentID} status from 1 to 2 after confirmation", assignment.AssignmentID);
+                            }
+                        }
                     }
 
                     if (dto.Notes != null)

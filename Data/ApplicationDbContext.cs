@@ -25,6 +25,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<WorkItem> WorkItems { get; set; }
     public DbSet<TechnicalNotification> TechnicalNotifications { get; set; }
     public DbSet<TSMay> TSMay { get; set; }
+    public DbSet<ApprovalWorkflow> ApprovalWorkflows { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -326,6 +327,16 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.TechnicalStatus).HasMaxLength(100);
             entity.Property(e => e.RoutDrawingCode).HasMaxLength(100);
             entity.Property(e => e.VoDrawingCode).HasMaxLength(100);
+            // Configure decimal properties with precision and scale to prevent truncation warnings
+            entity.Property(e => e.VoLength)
+                .HasColumnType("decimal(18,2)")
+                .HasPrecision(18, 2);
+            entity.Property(e => e.VoWidth)
+                .HasColumnType("decimal(18,2)")
+                .HasPrecision(18, 2);
+            entity.Property(e => e.VoHeight)
+                .HasColumnType("decimal(18,2)")
+                .HasPrecision(18, 2);
             entity.Property(e => e.Accessories).HasMaxLength(500);
             entity.Property(e => e.MaterialUsage).HasMaxLength(500);
             entity.Property(e => e.TechnicalNotes).HasMaxLength(1000);
@@ -398,6 +409,91 @@ public class ApplicationDbContext : DbContext
             entity.HasIndex(e => e.LSX);
             entity.HasIndex(e => e.CongSuat);
             entity.HasIndex(e => e.Phase);
+        });
+
+        // ApprovalWorkflow
+        modelBuilder.Entity<ApprovalWorkflow>(entity =>
+        {
+            entity.ToTable("ApprovalWorkflow");
+            entity.HasKey(e => e.WorkflowID);
+            entity.Property(e => e.WorkflowID)
+                .ValueGeneratedOnAdd()
+                .HasColumnType("int");
+            entity.Property(e => e.RequestTitle)
+                .HasMaxLength(500)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.RequestDescription)
+                .HasMaxLength(2000)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.RequestType)
+                .HasMaxLength(100)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.RequestReferenceID)
+                .HasMaxLength(1000)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.RequesterFirebaseUID)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.RequesterName)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.RequesterEmail)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.RequestStatus)
+                .HasMaxLength(50)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ControllerFirebaseUID)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ControllerName)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ControllerEmail)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ControlStatus)
+                .HasMaxLength(50)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ControlNotes)
+                .HasMaxLength(1000)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ApproverFirebaseUID)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ApproverName)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ApproverEmail)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ApprovalStatus)
+                .HasMaxLength(50)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ApprovalNotes)
+                .HasMaxLength(1000)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.OverallStatus)
+                .HasMaxLength(50)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.PowerAutomateFlowRunID)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.PowerAutomateFlowURL)
+                .HasMaxLength(500)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.CreatedBy)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.UpdatedBy)
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            
+            entity.HasIndex(e => e.RequesterFirebaseUID);
+            entity.HasIndex(e => e.ControllerFirebaseUID);
+            entity.HasIndex(e => e.ApproverFirebaseUID);
+            entity.HasIndex(e => e.OverallStatus);
+            entity.HasIndex(e => e.RequestReferenceID);
         });
 
         // Seed initial admin role and permission if table is empty at migration time handled separately

@@ -318,8 +318,10 @@ public class WorkItemsController : ControllerBase
                     // Save changes first to get updated work item state
                     await _context.SaveChangesAsync();
 
-                    // Nếu work item đã hoàn thành (ActualFinish != null), xóa notification
-                    if (workItem.ActualFinish.HasValue)
+                    // Xóa notification nếu work item đã hoàn thành (ActualFinish != null) hoặc đã được xác nhận (PersonConfirmation = true)
+                    bool shouldDeleteNotification = workItem.ActualFinish.HasValue || workItem.PersonConfirmation == true;
+                    
+                    if (shouldDeleteNotification)
                     {
                         var notifications = await _context.Notifications
                             .Where(n => 
@@ -331,7 +333,11 @@ public class WorkItemsController : ControllerBase
                         {
                             var userIds = notifications.Select(n => n.UserId).Distinct().ToList();
                             _context.Notifications.RemoveRange(notifications);
-                            _logger?.LogInformation("Deleted {Count} notification(s) because work item {WorkItemID} is completed", notifications.Count, workItem.WorkItemID);
+                            
+                            string reason = workItem.ActualFinish.HasValue 
+                                ? "completed" 
+                                : "confirmed";
+                            _logger?.LogInformation("Deleted {Count} notification(s) because work item {WorkItemID} is {Reason}", notifications.Count, workItem.WorkItemID, reason);
                             
                             // Gửi SignalR notification để client update
                             if (_hubContext != null)

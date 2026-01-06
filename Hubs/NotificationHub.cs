@@ -8,13 +8,16 @@ public class NotificationHub : Hub
 {
     public override async Task OnConnectedAsync()
     {
-        var userId = Context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-            ?? Context.User?.FindFirst("sub")?.Value;
+        var nameIdentifier = Context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var sub = Context.User?.FindFirst("sub")?.Value;
+        var firebaseUid = Context.User?.FindFirst("firebase_uid")?.Value;
+        var userId = nameIdentifier ?? sub ?? firebaseUid;
         
         if (!string.IsNullOrEmpty(userId))
         {
             // Join group với userId để chỉ nhận notifications của chính user đó
-            await Groups.AddToGroupAsync(Context.ConnectionId, $"user_{userId}");
+            var groupName = $"user_{userId}";
+            await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
         }
         
         await base.OnConnectedAsync();

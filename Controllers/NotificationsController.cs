@@ -41,11 +41,11 @@ public class NotificationsController : ControllerBase
                 .OrderByDescending(n => n.CreatedAt)
                 .ToListAsync();
 
-            // Lấy notifications của work items chưa hoàn thành (ActualFinish == null)
+            // Lấy notifications của work items chưa hoàn thành (ActualFinish == null) VÀ chưa được xác nhận (PersonConfirmation != true)
             var workItemNotifications = await (from n in _context.Notifications
                                                where n.UserId == userId && n.RelatedEntityType == "WorkItem" && n.RelatedEntityId.HasValue
                                                join wi in _context.WorkItems on n.RelatedEntityId.Value equals wi.WorkItemID
-                                               where wi.ActualFinish == null
+                                               where wi.ActualFinish == null && wi.PersonConfirmation != true
                                                orderby n.CreatedAt descending
                                                select n).ToListAsync();
 
@@ -80,11 +80,11 @@ public class NotificationsController : ControllerBase
             var nonWorkItemCount = await _context.Notifications
                 .CountAsync(n => n.UserId == userId && !n.IsRead && n.RelatedEntityType != "WorkItem");
 
-            // Đếm notifications của work items chưa hoàn thành (ActualFinish == null)
+            // Đếm notifications của work items chưa hoàn thành (ActualFinish == null) VÀ chưa được xác nhận (PersonConfirmation != true)
             var workItemNotifications = await (from n in _context.Notifications
                                                where n.UserId == userId && !n.IsRead && n.RelatedEntityType == "WorkItem" && n.RelatedEntityId.HasValue
                                                join wi in _context.WorkItems on n.RelatedEntityId.Value equals wi.WorkItemID
-                                               where wi.ActualFinish == null
+                                               where wi.ActualFinish == null && wi.PersonConfirmation != true
                                                select n).CountAsync();
 
             var count = nonWorkItemCount + workItemNotifications;
@@ -234,6 +234,14 @@ public class NotificationsController : ControllerBase
             {
                 _logger?.LogInformation("SyncMyNotifications: Processing work item {WorkItemID}, PersonName: {PersonName}", 
                     workItem.WorkItemID, workItem.PersonName);
+
+                // Skip work items that are already completed or confirmed
+                if (workItem.ActualFinish.HasValue || workItem.PersonConfirmation == true)
+                {
+                    _logger?.LogInformation("SyncMyNotifications: Skipping work item {WorkItemID} - already completed or confirmed", workItem.WorkItemID);
+                    skippedCount++;
+                    continue;
+                }
 
                 // Check if notification already exists
                 var existingNotification = await _context.Notifications

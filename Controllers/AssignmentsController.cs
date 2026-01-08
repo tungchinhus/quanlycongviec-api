@@ -1177,34 +1177,58 @@ public class AssignmentsController : ControllerBase
 
             // Reset personConfirmation của workitem thiết kế (Core Design hoặc Casing Design) về false
             // Để user thiết kế có thể chỉnh sửa lại sau khi mở khóa
+            // CHỈ reset workitems của user thiết kế tương ứng, không reset tất cả users
             // Đồng thời reset personConfirmation của workitem kiểm soát (Core Review hoặc Casing Review) về false
-            // Để cập nhật trạng thái và hiển thị lại chức năng xác nhận trong menu
+            // CHỈ reset review workitems tương ứng với design workitems đã được reset
             if (assignment.WorkItems != null)
             {
-                // Reset workitem thiết kế
-                var designWorkItems = assignment.WorkItems
-                    .Where(wi => (wi.WorkType == "Core Design" || wi.WorkType == "Casing Design") 
-                                 && wi.PersonConfirmation == true)
+                // Lấy danh sách PersonName của các design workitems (user thiết kế) đã được xác nhận
+                // PersonName có thể là UserId (string), FullName, hoặc UserName
+                var designWorkItemPersonNames = assignment.WorkItems
+                    .Where(wi => (wi.WorkType == "Core Design" || wi.WorkType == "Casing Design")
+                                 && wi.PersonConfirmation == true
+                                 && !string.IsNullOrEmpty(wi.PersonName))
+                    .Select(wi => wi.PersonName)
+                    .Distinct()
                     .ToList();
                 
-                foreach (var designWorkItem in designWorkItems)
+                if (designWorkItemPersonNames.Any())
                 {
-                    designWorkItem.PersonConfirmation = false;
-                    _logger?.LogInformation("Reset personConfirmation to false for design workitem {WorkItemID} (WorkType: {WorkType}) when unlocking assignment {AssignmentID}", 
-                        designWorkItem.WorkItemID, designWorkItem.WorkType, id);
+                    _logger?.LogInformation("Unlocking assignment {AssignmentID}: Found {Count} design user(s) to reset: {PersonNames}", 
+                        id, designWorkItemPersonNames.Count, string.Join(", ", designWorkItemPersonNames));
+                    
+                    // Reset workitem thiết kế - CHỈ reset workitems của user thiết kế tương ứng
+                    var designWorkItems = assignment.WorkItems
+                        .Where(wi => (wi.WorkType == "Core Design" || wi.WorkType == "Casing Design")
+                                     && wi.PersonConfirmation == true
+                                     && designWorkItemPersonNames.Contains(wi.PersonName))
+                        .ToList();
+                    
+                    foreach (var designWorkItem in designWorkItems)
+                    {
+                        designWorkItem.PersonConfirmation = false;
+                        _logger?.LogInformation("Reset personConfirmation to false for design workitem {WorkItemID} (WorkType: {WorkType}, PersonName: {PersonName}) when unlocking assignment {AssignmentID}", 
+                            designWorkItem.WorkItemID, designWorkItem.WorkType, designWorkItem.PersonName, id);
+                    }
+                    
+                    // Reset workitem kiểm soát - CHỈ reset review workitems tương ứng với design workitems đã reset
+                    // Tìm review workitems có cùng PersonName với design workitems đã được reset
+                    var reviewWorkItems = assignment.WorkItems
+                        .Where(wi => (wi.WorkType == "Core Review" || wi.WorkType == "Casing Review")
+                                     && wi.PersonConfirmation == true
+                                     && designWorkItemPersonNames.Contains(wi.PersonName))
+                        .ToList();
+                    
+                    foreach (var reviewWorkItem in reviewWorkItems)
+                    {
+                        reviewWorkItem.PersonConfirmation = false;
+                        _logger?.LogInformation("Reset personConfirmation to false for review workitem {WorkItemID} (WorkType: {WorkType}, PersonName: {PersonName}) when unlocking assignment {AssignmentID} to update status and show confirm button", 
+                            reviewWorkItem.WorkItemID, reviewWorkItem.WorkType, reviewWorkItem.PersonName, id);
+                    }
                 }
-                
-                // Reset workitem kiểm soát để cập nhật trạng thái và hiển thị lại chức năng xác nhận
-                var reviewWorkItems = assignment.WorkItems
-                    .Where(wi => (wi.WorkType == "Core Review" || wi.WorkType == "Casing Review") 
-                                 && wi.PersonConfirmation == true)
-                    .ToList();
-                
-                foreach (var reviewWorkItem in reviewWorkItems)
+                else
                 {
-                    reviewWorkItem.PersonConfirmation = false;
-                    _logger?.LogInformation("Reset personConfirmation to false for review workitem {WorkItemID} (WorkType: {WorkType}) when unlocking assignment {AssignmentID} to update status and show confirm button", 
-                        reviewWorkItem.WorkItemID, reviewWorkItem.WorkType, id);
+                    _logger?.LogWarning("Unlocking assignment {AssignmentID}: No confirmed design workitems found with PersonName, skipping reset", id);
                 }
             }
 

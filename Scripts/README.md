@@ -66,6 +66,27 @@ sqlcmd -S localhost -E -i Scripts/CreateDatabase.sql
 - **Permissions**: files.view, files.manage, users.manage
 - **RolePermissions**: Admin có tất cả permissions
 
+## UpdateUserNames.sql
+
+Script này cập nhật tên (FullName) của user trong database để đồng bộ với Firebase Authentication custom claims.
+
+### Cách sử dụng:
+
+1. Mở file `UpdateUserNames.sql` trong SQL Server Management Studio
+2. Kiểm tra và chỉnh sửa email và tên tương ứng nếu cần
+3. Chạy script (F5 hoặc Execute)
+
+### Script hiện tại cập nhật:
+
+- `tung.lm@thibidi.com` → `Lê Minh Tùng`
+- `hoa.dc@thibidi.com` → `Dương Công Hòa`
+
+### Lưu ý:
+
+- Script sẽ hiển thị thông báo nếu không tìm thấy user với email tương ứng
+- Script sẽ hiển thị thông tin user sau khi cập nhật thành công
+- Có thể mở rộng script để thêm nhiều user khác nếu cần
+
 ### Lưu ý:
 
 - Admin user sẽ được tạo tự động bởi `DbSeeder` khi ứng dụng khởi động lần đầu

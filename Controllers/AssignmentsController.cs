@@ -58,6 +58,7 @@ public class AssignmentsController : ControllerBase
                 TeamLeader = a.TeamLeader,
                 FilePath = a.FilePath,
                 Status = a.Status,
+                IsLocked = a.IsLocked,
                 TechnicalSheet = a.TechnicalSheet != null ? new TechnicalSheetDto
                 {
                     TBKT_ID = a.TechnicalSheet.TBKT_ID,
@@ -145,6 +146,7 @@ public class AssignmentsController : ControllerBase
                 TeamLeader = assignment.TeamLeader,
                 FilePath = assignment.FilePath,
                 Status = assignment.Status,
+                IsLocked = assignment.IsLocked,
                 TechnicalSheet = assignment.TechnicalSheet != null ? new TechnicalSheetDto
                 {
                     TBKT_ID = assignment.TechnicalSheet.TBKT_ID,
@@ -432,6 +434,7 @@ public class AssignmentsController : ControllerBase
                 TeamLeader = assignment.TeamLeader,
                 FilePath = assignment.FilePath,
                 Status = assignment.Status,
+                IsLocked = assignment.IsLocked,
                 TechnicalSheet = assignment.TechnicalSheet != null ? new TechnicalSheetDto
                 {
                     TBKT_ID = assignment.TechnicalSheet.TBKT_ID,
@@ -723,6 +726,12 @@ public class AssignmentsController : ControllerBase
             _context.WorkItems.Add(workItem);
             await _context.SaveChangesAsync();
 
+            // Cập nhật trạng thái tổng của assignment dựa trên tất cả work items
+            await AssignmentStatusHelper.UpdateAssignmentStatusAsync(
+                _context, 
+                id, 
+                _logger);
+
             // Handle notification for assigned user
             try
             {
@@ -806,8 +815,32 @@ public class AssignmentsController : ControllerBase
     {
         try
         {
-            // Kiểm tra nếu user là admin - admin có quyền xem tất cả work items
+            // Kiểm tra nếu user là admin hoặc manager - có quyền xem tất cả work items
+            // Chỉ Manager và ManagerL1 mới thấy tất cả, ManagerL2 trở đi chỉ thấy workitems của họ
             var isAdmin = RoleHelper.IsAdministrator(User);
+            var isManager = RoleHelper.IsManager(User);
+            
+            // Kiểm tra xem có phải Manager hoặc ManagerL1 không (không bao gồm ManagerL2, ManagerL3, etc.)
+            bool isManagerOrManagerL1 = false;
+            if (isManager)
+            {
+                var roleClaims = User.Claims
+                    .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role || 
+                               c.Type == "role" || 
+                               c.Type == "roles" ||
+                               c.Type == "http://schemas.microsoft.com/ws/2008/06/identity/claims/role" ||
+                               c.Type == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/role")
+                    .Select(c => c.Value)
+                    .ToList();
+                
+                // Chỉ Manager hoặc ManagerL1 mới có quyền xem tất cả
+                isManagerOrManagerL1 = roleClaims.Any(role => 
+                    role != null && 
+                    (role.Equals("Manager", StringComparison.OrdinalIgnoreCase) || 
+                     role.Equals("ManagerL1", StringComparison.OrdinalIgnoreCase)));
+            }
+            
+            var canViewAll = isAdmin || isManagerOrManagerL1;
             
             // Lấy FirebaseUID từ JWT token
             var firebaseUID = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
@@ -842,9 +875,9 @@ public class AssignmentsController : ControllerBase
 
             List<WorkItemRawData> workItemsData;
             
-            if (isAdmin)
+            if (canViewAll)
             {
-                // Admin có quyền xem tất cả work items
+                // Admin và Manager có quyền xem tất cả work items (để có thể unlock assignments)
                 workItemsData = await _context.Database.SqlQueryRaw<WorkItemRawData>(
                     @"SELECT 
                         wi.WorkItemID,
@@ -861,12 +894,14 @@ public class AssignmentsController : ControllerBase
             }
             else
             {
-                // Tìm work items theo PersonName
-                // PersonName có thể là: UserId (string), FullName, hoặc UserName
+                // User thường (không phải Manager/Admin) chỉ thấy workitems của họ
+                // Bao gồm tất cả workitem types: Review, Design, Material Leveling, và các loại khác
                 var userIdString = user.UserId.ToString();
                 
                 // Query work items using raw SQL to handle PersonConfirmation type conversion
                 // This avoids InvalidCastException when database has string instead of bit
+                // PersonName có thể là số (UserId) hoặc string (UserName/FullName)
+                // Lấy tất cả workitems có PersonName match (không filter theo WorkType)
                 workItemsData = await _context.Database.SqlQueryRaw<WorkItemRawData>(
                     @"SELECT 
                         wi.WorkItemID,
@@ -879,11 +914,19 @@ public class AssignmentsController : ControllerBase
                         CAST(wi.PersonConfirmation AS NVARCHAR(10)) AS PersonConfirmationRaw,
                         wi.Notes
                       FROM WorkItem wi
-                      WHERE wi.PersonName = {0} OR wi.PersonName = {1} OR wi.PersonName = {2}
+                      WHERE (
+                        (ISNUMERIC(wi.PersonName) = 1 AND CAST(wi.PersonName AS INT) = {3})
+                        OR CAST(wi.PersonName AS NVARCHAR(50)) = {0}
+                        OR CAST(wi.PersonName AS NVARCHAR(50)) = {1}
+                        OR CAST(wi.PersonName AS NVARCHAR(50)) = {2}
+                      )
                       ORDER BY wi.StartDate DESC",
                     userIdString,
                     user.FullName ?? "",
-                    user.UserName ?? "").ToListAsync();
+                    user.UserName ?? "",
+                    user.UserId).ToListAsync();
+                
+                _logger?.LogInformation("GetMyWorkItems: Found {Count} workitems for user {UserId}", workItemsData.Count, user.UserId);
             }
 
             // Get assignment IDs to load MachineAssignments
@@ -942,7 +985,8 @@ public class AssignmentsController : ControllerBase
                         Designer = assignment.Designer,
                         TeamLeader = assignment.TeamLeader,
                         FilePath = assignment.FilePath,
-                        Status = assignment.Status
+                        Status = assignment.Status,
+                        IsLocked = assignment.IsLocked
                     } : null
                 };
             }).ToList();
@@ -1057,6 +1101,168 @@ public class AssignmentsController : ControllerBase
                 });
                 await _hubContext.Clients.Group($"user_{user.FirebaseUID}").SendAsync("UnreadCountChanged");
             }
+        }
+    }
+
+    // PUT: api/assignments/{id}/unlock
+    // Mở khóa assignment để cho phép user thiết kế update workitem
+    // Cho phép Manager/Admin hoặc user kiểm soát (người đã xác nhận review workitem)
+    [HttpPut("{id}/unlock")]
+    [Authorize]
+    public async Task<IActionResult> UnlockAssignment(int id)
+    {
+        try
+        {
+            var assignment = await _context.MachineAssignments
+                .Include(a => a.WorkItems)
+                .FirstOrDefaultAsync(a => a.AssignmentID == id);
+
+            if (assignment == null)
+            {
+                return NotFound(new { error = "Assignment not found", assignmentID = id });
+            }
+
+            if (!assignment.IsLocked)
+            {
+                return BadRequest(new { error = "Assignment is not locked", message = "Assignment này chưa bị khóa." });
+            }
+
+            // Kiểm tra quyền: Manager/Admin hoặc user kiểm soát đã xác nhận
+            var isManagerOrAdmin = RoleHelper.IsAdministratorOrManager(User);
+            var hasUnlockPermission = isManagerOrAdmin;
+
+            // Nếu không phải Manager/Admin, kiểm tra xem có phải user kiểm soát đã xác nhận không
+            if (!hasUnlockPermission)
+            {
+                // Lấy FirebaseUID từ JWT token
+                var firebaseUID = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
+                    ?? User.FindFirst("sub")?.Value;
+                
+                if (!string.IsNullOrEmpty(firebaseUID))
+                {
+                    // Lấy thông tin user từ database bằng FirebaseUID
+                    var user = await _context.Users
+                        .FirstOrDefaultAsync(u => u.FirebaseUID == firebaseUID);
+                    
+                    if (user != null)
+                    {
+                        // PersonName có thể là: UserId (string), FullName, hoặc UserName
+                        var userIdString = user.UserId.ToString();
+                        var fullName = user.FullName ?? "";
+                        var userName = user.UserName ?? "";
+                        
+                        // Kiểm tra xem user có phải là người đã xác nhận review workitem (Core Review hoặc Casing Review) không
+                        var reviewWorkItems = assignment.WorkItems?.Where(wi => 
+                            (wi.WorkType == "Core Review" || wi.WorkType == "Casing Review") &&
+                            wi.PersonConfirmation == true &&
+                            (wi.PersonName == userIdString || 
+                             wi.PersonName == fullName ||
+                             wi.PersonName == userName)
+                        ).ToList();
+
+                        if (reviewWorkItems != null && reviewWorkItems.Any())
+                        {
+                            hasUnlockPermission = true;
+                            _logger?.LogInformation("User {UserId} ({FullName}) has unlock permission as review workitem confirmer for assignment {AssignmentID}", 
+                                user.UserId, user.FullName, id);
+                        }
+                    }
+                }
+            }
+
+            if (!hasUnlockPermission)
+            {
+                return Forbid("Bạn không có quyền mở khóa assignment này. Chỉ Manager/Admin hoặc user kiểm soát đã xác nhận mới có quyền mở khóa.");
+            }
+
+            // Reset personConfirmation của workitem thiết kế (Core Design hoặc Casing Design) về false
+            // Để user thiết kế có thể chỉnh sửa lại sau khi mở khóa
+            // Đồng thời reset personConfirmation của workitem kiểm soát (Core Review hoặc Casing Review) về false
+            // Để cập nhật trạng thái và hiển thị lại chức năng xác nhận trong menu
+            if (assignment.WorkItems != null)
+            {
+                // Reset workitem thiết kế
+                var designWorkItems = assignment.WorkItems
+                    .Where(wi => (wi.WorkType == "Core Design" || wi.WorkType == "Casing Design") 
+                                 && wi.PersonConfirmation == true)
+                    .ToList();
+                
+                foreach (var designWorkItem in designWorkItems)
+                {
+                    designWorkItem.PersonConfirmation = false;
+                    _logger?.LogInformation("Reset personConfirmation to false for design workitem {WorkItemID} (WorkType: {WorkType}) when unlocking assignment {AssignmentID}", 
+                        designWorkItem.WorkItemID, designWorkItem.WorkType, id);
+                }
+                
+                // Reset workitem kiểm soát để cập nhật trạng thái và hiển thị lại chức năng xác nhận
+                var reviewWorkItems = assignment.WorkItems
+                    .Where(wi => (wi.WorkType == "Core Review" || wi.WorkType == "Casing Review") 
+                                 && wi.PersonConfirmation == true)
+                    .ToList();
+                
+                foreach (var reviewWorkItem in reviewWorkItems)
+                {
+                    reviewWorkItem.PersonConfirmation = false;
+                    _logger?.LogInformation("Reset personConfirmation to false for review workitem {WorkItemID} (WorkType: {WorkType}) when unlocking assignment {AssignmentID} to update status and show confirm button", 
+                        reviewWorkItem.WorkItemID, reviewWorkItem.WorkType, id);
+                }
+            }
+
+            assignment.IsLocked = false;
+            await _context.SaveChangesAsync();
+
+            _logger?.LogInformation("Unlocked assignment {AssignmentID} by user {Username}", id, User.Identity?.Name);
+
+            return Ok(new { 
+                message = "Assignment đã được mở khóa thành công", 
+                assignmentID = id,
+                isLocked = false
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error unlocking assignment {AssignmentID}: {Message}", id, ex.Message);
+            return StatusCode(500, new { error = "Error unlocking assignment", message = ex.Message });
+        }
+    }
+
+    // PUT: api/assignments/{id}/lock
+    // Khóa assignment (tùy chọn - có thể dùng để khóa thủ công)
+    // Chỉ user kiểm soát (Manager) mới có quyền lock
+    [HttpPut("{id}/lock")]
+    [Authorize(Roles = "Manager,Administrator,Admin")]
+    public async Task<IActionResult> LockAssignment(int id)
+    {
+        try
+        {
+            var assignment = await _context.MachineAssignments
+                .FirstOrDefaultAsync(a => a.AssignmentID == id);
+
+            if (assignment == null)
+            {
+                return NotFound(new { error = "Assignment not found", assignmentID = id });
+            }
+
+            if (assignment.IsLocked)
+            {
+                return BadRequest(new { error = "Assignment is already locked", message = "Assignment này đã bị khóa." });
+            }
+
+            assignment.IsLocked = true;
+            await _context.SaveChangesAsync();
+
+            _logger?.LogInformation("Locked assignment {AssignmentID} by user", id);
+
+            return Ok(new { 
+                message = "Assignment đã được khóa thành công", 
+                assignmentID = id,
+                isLocked = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error locking assignment {AssignmentID}: {Message}", id, ex.Message);
+            return StatusCode(500, new { error = "Error locking assignment", message = ex.Message });
         }
     }
 }

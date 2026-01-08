@@ -233,6 +233,11 @@ public class ApplicationDbContext : DbContext
                 .HasDefaultValue(1)
                 .HasColumnName("status")
                 .HasColumnType("int"); // Map với cột lowercase trong database
+            entity.Property(e => e.IsLocked)
+                .IsRequired()
+                .HasDefaultValue(false)
+                .HasColumnName("IsLocked")
+                .HasColumnType("bit");
             
             entity.HasOne(e => e.TechnicalSheet)
                   .WithMany(ts => ts.MachineAssignments)

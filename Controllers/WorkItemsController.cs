@@ -127,6 +127,24 @@ public class WorkItemsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<WorkItemDto>> CreateWorkItem([FromBody] CreateWorkItemDto dto)
     {
+        // Kiểm tra lock status trước khi vào transaction (nếu PersonConfirmation = true)
+        if (dto.PersonConfirmation == true)
+        {
+            var assignmentCheck = await _context.MachineAssignments
+                .FirstOrDefaultAsync(a => a.AssignmentID == dto.AssignmentID);
+            
+            if (assignmentCheck == null)
+            {
+                return NotFound(new { error = "Assignment not found" });
+            }
+
+            if (assignmentCheck.IsLocked)
+            {
+                _logger?.LogWarning("Cannot create work item with confirmation - assignment {AssignmentID} is locked", dto.AssignmentID);
+                return BadRequest(new { error = "Cannot create work item", message = "Assignment đã bị khóa. Vui lòng liên hệ user kiểm soát để mở khóa." });
+            }
+        }
+
         // Use execution strategy to support retries with transaction
         WorkItem? workItem = null;
         MachineAssignment? assignment = null;
@@ -161,14 +179,23 @@ public class WorkItemsController : ControllerBase
 
                     _context.WorkItems.Add(workItem);
                     
-                    // Khi user tạo work item với xác nhận (PersonConfirmation = true), cập nhật trạng thái giao việc thành 2 (đang xử lý)
-                    if (dto.PersonConfirmation == true && assignment.Status == 1)
+                    // Khi user tạo work item với xác nhận (PersonConfirmation = true), khóa assignment
+                    // Trạng thái sẽ được tự động tính lại bởi AssignmentStatusHelper
+                    if (dto.PersonConfirmation == true)
                     {
-                        assignment.Status = 2; // 2: đang xử lý
-                        _logger?.LogInformation("Updated MachineAssignment {AssignmentID} status from 1 to 2 after creating work item with confirmation", assignment.AssignmentID);
+                        // Tự động khóa assignment khi user thiết kế xác nhận hoàn thành
+                        assignment.IsLocked = true;
+                        _logger?.LogInformation("Locked MachineAssignment {AssignmentID} after creating work item with confirmation", assignment.AssignmentID);
                     }
                     
                     await _context.SaveChangesAsync();
+                    
+                    // Cập nhật trạng thái tổng của assignment dựa trên tất cả work items
+                    await AssignmentStatusHelper.UpdateAssignmentStatusAsync(
+                        _context, 
+                        workItem.AssignmentID, 
+                        _logger);
+                    
                     await transaction.CommitAsync();
                 }
                 catch (DbUpdateException dbEx)
@@ -243,6 +270,109 @@ public class WorkItemsController : ControllerBase
             return BadRequest(new { error = "Request body is required" });
         }
 
+        // Kiểm tra lock status trước khi vào transaction
+        var workItemCheck = await _context.WorkItems
+            .Include(wi => wi.MachineAssignment)
+            .FirstOrDefaultAsync(wi => wi.WorkItemID == id);
+        
+        if (workItemCheck == null)
+        {
+            return NotFound(new { error = "Work item not found", workItemID = id });
+        }
+
+        // Kiểm tra xem assignment có bị khóa không
+        var assignmentCheck = workItemCheck.MachineAssignment;
+        if (assignmentCheck == null)
+        {
+            assignmentCheck = await _context.MachineAssignments
+                .FirstOrDefaultAsync(a => a.AssignmentID == workItemCheck.AssignmentID);
+        }
+
+        // Cho phép Manager/Administrator update ngay cả khi assignment bị locked
+        // Cho phép user kiểm soát (review workitem) xác nhận ngay cả khi assignment bị locked
+        // Cho phép user thiết kế (design workitem) chỉnh sửa và xác nhận khi chưa xác nhận, ngay cả khi assignment bị locked
+        bool isManagerOrAdmin = RoleHelper.IsAdministratorOrManager(User);
+        bool canBypassLock = isManagerOrAdmin;
+        
+        // Nếu không phải Manager/Admin, kiểm tra xem có phải user được gán cho workitem này không
+        // Cho phép user chỉnh sửa workitem của họ khi chưa xác nhận, bất kể loại workitem
+        if (!canBypassLock && assignmentCheck != null && assignmentCheck.IsLocked)
+        {
+            // Kiểm tra xem có phải review workitem (Core Review hoặc Casing Review) không
+            bool isReviewWorkItem = workItemCheck.WorkType == "Core Review" || workItemCheck.WorkType == "Casing Review";
+            // Kiểm tra xem có phải design workitem (Core Design hoặc Casing Design) không
+            bool isDesignWorkItem = workItemCheck.WorkType == "Core Design" || workItemCheck.WorkType == "Casing Design";
+            // Kiểm tra xem có phải material leveling workitem không
+            bool isMaterialLeveling = workItemCheck.WorkType == "Material Leveling";
+            
+            // Cho phép bypass lock cho tất cả loại workitem nếu user được gán và chưa xác nhận
+            if (isReviewWorkItem || isDesignWorkItem || isMaterialLeveling)
+            {
+                // Lấy FirebaseUID từ JWT token
+                var firebaseUID = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
+                    ?? User.FindFirst("sub")?.Value;
+                
+                if (!string.IsNullOrEmpty(firebaseUID))
+                {
+                    // Lấy thông tin user từ database bằng FirebaseUID
+                    var user = await _context.Users
+                        .FirstOrDefaultAsync(u => u.FirebaseUID == firebaseUID);
+                    
+                    if (user != null)
+                    {
+                        // PersonName có thể là: UserId (string), FullName, hoặc UserName
+                        var userIdString = user.UserId.ToString();
+                        var fullName = user.FullName ?? "";
+                        var userName = user.UserName ?? "";
+                        
+                        // Kiểm tra xem user có phải là người được gán cho workitem này không
+                        bool isAssignedUser = workItemCheck.PersonName == userIdString || 
+                                             workItemCheck.PersonName == fullName ||
+                                             workItemCheck.PersonName == userName;
+                        
+                        if (isAssignedUser)
+                        {
+                            // Kiểm tra xem workitem đã được xác nhận chưa
+                            bool isNotConfirmed = !workItemCheck.PersonConfirmation.GetValueOrDefault();
+                            
+                            if (isReviewWorkItem)
+                            {
+                                // User kiểm soát có thể xác nhận review workitem
+                                canBypassLock = true;
+                                _logger?.LogInformation("User kiểm soát {UserId} ({FullName}) bypassing lock to confirm review workitem {WorkItemID} - assignment {AssignmentID}", 
+                                    user.UserId, user.FullName, id, assignmentCheck.AssignmentID);
+                            }
+                            else if (isDesignWorkItem && isNotConfirmed)
+                            {
+                                // User thiết kế có thể chỉnh sửa và xác nhận design workitem khi chưa xác nhận
+                                canBypassLock = true;
+                                _logger?.LogInformation("User thiết kế {UserId} ({FullName}) bypassing lock to edit/confirm design workitem {WorkItemID} (chưa xác nhận) - assignment {AssignmentID}", 
+                                    user.UserId, user.FullName, id, assignmentCheck.AssignmentID);
+                            }
+                            else if (isMaterialLeveling && isNotConfirmed)
+                            {
+                                // User vật tư có thể chỉnh sửa và xác nhận material leveling workitem khi chưa xác nhận
+                                canBypassLock = true;
+                                _logger?.LogInformation("User vật tư {UserId} ({FullName}) bypassing lock to edit/confirm material leveling workitem {WorkItemID} (chưa xác nhận) - assignment {AssignmentID}", 
+                                    user.UserId, user.FullName, id, assignmentCheck.AssignmentID);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (assignmentCheck != null && assignmentCheck.IsLocked && !canBypassLock)
+        {
+            _logger?.LogWarning("Cannot update work item {WorkItemID} - assignment {AssignmentID} is locked and user does not have permission", id, assignmentCheck.AssignmentID);
+            return BadRequest(new { error = "Cannot update work item", message = "Assignment đã bị khóa. Vui lòng liên hệ user kiểm soát để mở khóa." });
+        }
+        
+        if (assignmentCheck != null && assignmentCheck.IsLocked && canBypassLock)
+        {
+            _logger?.LogInformation("Bypassing lock - updating work item {WorkItemID} - assignment {AssignmentID}", id, assignmentCheck.AssignmentID);
+        }
+
         // Use execution strategy to support retries with transaction
         WorkItem? workItem = null;
         var strategy = _context.Database.CreateExecutionStrategy();
@@ -254,8 +384,9 @@ public class WorkItemsController : ControllerBase
                 await using var transaction = await _context.Database.BeginTransactionAsync();
                 try
                 {
-                    // Get work item from database
+                    // Get work item from database with assignment
                     workItem = await _context.WorkItems
+                        .Include(wi => wi.MachineAssignment)
                         .FirstOrDefaultAsync(wi => wi.WorkItemID == id);
                     
                     if (workItem == null)
@@ -265,6 +396,14 @@ public class WorkItemsController : ControllerBase
                     }
                     
                     _logger?.LogInformation("Found work item {WorkItemID} for update", id);
+
+                    // Lấy assignment reference
+                    var assignment = workItem.MachineAssignment;
+                    if (assignment == null)
+                    {
+                        assignment = await _context.MachineAssignments
+                            .FirstOrDefaultAsync(a => a.AssignmentID == workItem.AssignmentID);
+                    }
 
                     // Update only provided fields
                     if (dto.WorkType != null)
@@ -296,18 +435,65 @@ public class WorkItemsController : ControllerBase
                     {
                         workItem.PersonConfirmation = dto.PersonConfirmation.Value;
                         
-                        // Khi user xác nhận (PersonConfirmation = true), cập nhật trạng thái giao việc thành 2 (đang xử lý)
+                        // Khi user xác nhận (PersonConfirmation = true), khóa assignment
+                        // Trạng thái sẽ được tự động tính lại bởi AssignmentStatusHelper
                         if (dto.PersonConfirmation.Value == true)
                         {
-                            var assignment = await _context.MachineAssignments
-                                .FirstOrDefaultAsync(a => a.AssignmentID == workItem.AssignmentID);
-                            
-                            if (assignment != null && assignment.Status == 1)
+                            if (assignment == null)
                             {
-                                assignment.Status = 2; // 2: đang xử lý
-                                _logger?.LogInformation("Updated MachineAssignment {AssignmentID} status from 1 to 2 after confirmation", assignment.AssignmentID);
+                                assignment = await _context.MachineAssignments
+                                    .FirstOrDefaultAsync(a => a.AssignmentID == workItem.AssignmentID);
+                            }
+                            
+                            if (assignment != null)
+                            {
+                                // Tự động khóa assignment khi user thiết kế xác nhận hoàn thành
+                                assignment.IsLocked = true;
+                                _logger?.LogInformation("Locked MachineAssignment {AssignmentID} after user confirmation", assignment.AssignmentID);
                             }
                         }
+                        // Khi user kiểm soát từ chối (PersonConfirmation = false cho review workitem), reset design workitem và unlock assignment
+                        else if (dto.PersonConfirmation.Value == false)
+                        {
+                            bool isReviewWorkItem = workItem.WorkType == "Core Review" || workItem.WorkType == "Casing Review";
+                            
+                            if (isReviewWorkItem)
+                            {
+                                if (assignment == null)
+                                {
+                                    assignment = await _context.MachineAssignments
+                                        .FirstOrDefaultAsync(a => a.AssignmentID == workItem.AssignmentID);
+                                }
+                                
+                                if (assignment != null)
+                                {
+                                    // Tìm design workitem tương ứng
+                                    string designWorkType = workItem.WorkType == "Core Review" ? "Core Design" : "Casing Design";
+                                    
+                                    var designWorkItem = await _context.WorkItems
+                                        .FirstOrDefaultAsync(wi => 
+                                            wi.AssignmentID == workItem.AssignmentID && 
+                                            wi.WorkType == designWorkType);
+                                    
+                                    if (designWorkItem != null)
+                                    {
+                                    // Reset design workitem về chưa hoàn thành
+                                    designWorkItem.PersonConfirmation = false;
+                                    designWorkItem.ActualFinish = null;
+                                    _logger?.LogInformation("Reset design workitem {DesignWorkItemID} (WorkType: {WorkType}) to not completed after review workitem {ReviewWorkItemID} rejection", 
+                                        designWorkItem.WorkItemID, designWorkItem.WorkType, workItem.WorkItemID);
+                                    
+                                    // Tạo notification cho user thiết kế về việc bị từ chối
+                                    await CreateNotificationForDesignUserRejectionAsync(designWorkItem, assignment, workItem.Notes);
+                                }
+                                
+                                // Unlock assignment để user thiết kế có thể chỉnh sửa lại
+                                assignment.IsLocked = false;
+                                _logger?.LogInformation("Unlocked MachineAssignment {AssignmentID} after review workitem {ReviewWorkItemID} rejection", 
+                                    assignment.AssignmentID, workItem.WorkItemID);
+                            }
+                        }
+                    }
                     }
 
                     if (dto.Notes != null)
@@ -351,7 +537,37 @@ public class WorkItemsController : ControllerBase
                         }
                     }
 
+                    // Nếu workitem thiết kế được xác nhận, tạo notification cho user kiểm soát tương ứng
+                    if (dto.PersonConfirmation.HasValue && dto.PersonConfirmation.Value == true)
+                    {
+                        bool isDesignWorkItem = workItem.WorkType == "Core Design" || workItem.WorkType == "Casing Design";
+                        
+                        if (isDesignWorkItem && assignment != null)
+                        {
+                            // Tìm workitem kiểm soát tương ứng
+                            string reviewWorkType = workItem.WorkType == "Core Design" ? "Core Review" : "Casing Review";
+                            
+                            var reviewWorkItem = await _context.WorkItems
+                                .FirstOrDefaultAsync(wi => 
+                                    wi.AssignmentID == workItem.AssignmentID && 
+                                    wi.WorkType == reviewWorkType);
+                            
+                            if (reviewWorkItem != null && !string.IsNullOrWhiteSpace(reviewWorkItem.PersonName))
+                            {
+                                // Tạo notification cho user kiểm soát
+                                await CreateNotificationForReviewUserAsync(reviewWorkItem, assignment);
+                            }
+                        }
+                    }
+
                     await _context.SaveChangesAsync();
+                    
+                    // Cập nhật trạng thái tổng của assignment dựa trên tất cả work items
+                    await AssignmentStatusHelper.UpdateAssignmentStatusAsync(
+                        _context, 
+                        workItem.AssignmentID, 
+                        _logger);
+                    
                     await transaction.CommitAsync();
                     
                     _logger?.LogInformation("Successfully updated work item {WorkItemID}", id);
@@ -438,8 +654,16 @@ public class WorkItemsController : ControllerBase
                         return;
                     }
 
+                    int assignmentId = workItem.AssignmentID;
                     _context.WorkItems.Remove(workItem);
                     await _context.SaveChangesAsync();
+                    
+                    // Cập nhật trạng thái tổng của assignment sau khi xóa work item
+                    await AssignmentStatusHelper.UpdateAssignmentStatusAsync(
+                        _context, 
+                        assignmentId, 
+                        _logger);
+                    
                     await transaction.CommitAsync();
                 }
                 catch (DbUpdateException dbEx)
@@ -571,6 +795,149 @@ public class WorkItemsController : ControllerBase
                 });
                 await _hubContext.Clients.Group($"user_{user.FirebaseUID}").SendAsync("UnreadCountChanged");
             }
+        }
+    }
+
+    // Tạo notification cho user kiểm soát khi workitem thiết kế được xác nhận
+    private async Task CreateNotificationForReviewUserAsync(WorkItem reviewWorkItem, MachineAssignment assignment)
+    {
+        if (string.IsNullOrWhiteSpace(reviewWorkItem.PersonName))
+        {
+            _logger?.LogWarning("Review WorkItem {WorkItemID} has no PersonName, skipping notification", reviewWorkItem.WorkItemID);
+            return;
+        }
+
+        // Find user kiểm soát by PersonName (could be UserName, FullName, or UserId)
+        var reviewUser = await _context.Users
+            .FirstOrDefaultAsync(u => 
+                u.UserName == reviewWorkItem.PersonName || 
+                u.FullName == reviewWorkItem.PersonName ||
+                u.UserId.ToString() == reviewWorkItem.PersonName);
+
+        if (reviewUser == null || string.IsNullOrEmpty(reviewUser.FirebaseUID))
+        {
+            _logger?.LogWarning("Review user not found for PersonName: {PersonName}, skipping notification", reviewWorkItem.PersonName);
+            return;
+        }
+
+        // Kiểm tra xem notification đã tồn tại chưa (tránh duplicate)
+        var existingNotification = await _context.Notifications
+            .FirstOrDefaultAsync(n => 
+                n.RelatedEntityType == "WorkItem" && 
+                n.RelatedEntityId == reviewWorkItem.WorkItemID &&
+                n.UserId == reviewUser.FirebaseUID &&
+                !n.IsRead);
+
+        if (existingNotification != null)
+        {
+            _logger?.LogInformation("Notification already exists for review workitem {WorkItemID}, skipping", reviewWorkItem.WorkItemID);
+            return;
+        }
+
+        // Get TBKT_ID from assignment
+        var assignmentWithTBKT = await _context.MachineAssignments
+            .Include(a => a.TechnicalSheet)
+            .FirstOrDefaultAsync(a => a.AssignmentID == assignment.AssignmentID);
+        
+        var tbktId = assignmentWithTBKT?.TechnicalSheet?.TBKT_ID ?? "N/A";
+        
+        // Create notification cho user kiểm soát
+        var notification = new Notification
+        {
+            UserId = reviewUser.FirebaseUID,
+            Title = "Công việc thiết kế đã được xác nhận",
+            Message = $"{assignment.MachineName} - {tbktId}",
+            Type = "info",
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow,
+            RelatedEntityType = "WorkItem",
+            RelatedEntityId = reviewWorkItem.WorkItemID
+        };
+
+        _context.Notifications.Add(notification);
+        await _context.SaveChangesAsync();
+        _logger?.LogInformation("Created notification for review user {FirebaseUID} about work item {WorkItemID}", reviewUser.FirebaseUID, reviewWorkItem.WorkItemID);
+        
+        // Gửi SignalR notification
+        if (_hubContext != null)
+        {
+            await _hubContext.Clients.Group($"user_{reviewUser.FirebaseUID}").SendAsync("NewNotification", new 
+            { 
+                id = notification.Id,
+                title = notification.Title,
+                message = notification.Message,
+                type = notification.Type,
+                createdAt = notification.CreatedAt
+            });
+            await _hubContext.Clients.Group($"user_{reviewUser.FirebaseUID}").SendAsync("UnreadCountChanged");
+        }
+    }
+
+    // Tạo notification cho user thiết kế khi workitem của họ bị từ chối
+    private async Task CreateNotificationForDesignUserRejectionAsync(WorkItem designWorkItem, MachineAssignment assignment, string? rejectionNotes)
+    {
+        if (string.IsNullOrWhiteSpace(designWorkItem.PersonName))
+        {
+            _logger?.LogWarning("Design WorkItem {WorkItemID} has no PersonName, skipping rejection notification", designWorkItem.WorkItemID);
+            return;
+        }
+
+        // Find user thiết kế by PersonName (could be UserName, FullName, or UserId)
+        var designUser = await _context.Users
+            .FirstOrDefaultAsync(u => 
+                u.UserName == designWorkItem.PersonName || 
+                u.FullName == designWorkItem.PersonName ||
+                u.UserId.ToString() == designWorkItem.PersonName);
+
+        if (designUser == null || string.IsNullOrEmpty(designUser.FirebaseUID))
+        {
+            _logger?.LogWarning("Design user not found for PersonName: {PersonName}, skipping rejection notification", designWorkItem.PersonName);
+            return;
+        }
+
+        // Get TBKT_ID from assignment
+        var assignmentWithTBKT = await _context.MachineAssignments
+            .Include(a => a.TechnicalSheet)
+            .FirstOrDefaultAsync(a => a.AssignmentID == assignment.AssignmentID);
+        
+        var tbktId = assignmentWithTBKT?.TechnicalSheet?.TBKT_ID ?? "N/A";
+        
+        // Tạo message với lý do từ chối nếu có
+        var message = tbktId;
+        if (!string.IsNullOrWhiteSpace(rejectionNotes))
+        {
+            message = $"{tbktId} - {rejectionNotes}";
+        }
+        
+        // Create notification cho user thiết kế
+        var notification = new Notification
+        {
+            UserId = designUser.FirebaseUID,
+            Title = "Công việc của bạn đã bị từ chối",
+            Message = message,
+            Type = "warning",
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow,
+            RelatedEntityType = "WorkItem",
+            RelatedEntityId = designWorkItem.WorkItemID
+        };
+
+        _context.Notifications.Add(notification);
+        await _context.SaveChangesAsync();
+        _logger?.LogInformation("Created rejection notification for design user {FirebaseUID} about work item {WorkItemID}", designUser.FirebaseUID, designWorkItem.WorkItemID);
+        
+        // Gửi SignalR notification
+        if (_hubContext != null)
+        {
+            await _hubContext.Clients.Group($"user_{designUser.FirebaseUID}").SendAsync("NewNotification", new 
+            { 
+                id = notification.Id,
+                title = notification.Title,
+                message = notification.Message,
+                type = notification.Type,
+                createdAt = notification.CreatedAt
+            });
+            await _hubContext.Clients.Group($"user_{designUser.FirebaseUID}").SendAsync("UnreadCountChanged");
         }
     }
 }

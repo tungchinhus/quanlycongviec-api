@@ -13,6 +13,7 @@ public class MachineAssignment
     public int? File_ID { get; set; } // Foreign key to Files.Id
     public string? FilePath { get; set; }
     public int Status { get; set; } = 1; // 1: new, 2: đang xử lý, 3: hoàn thành
+    public bool IsLocked { get; set; } = false; // Khóa để ngăn user thiết kế sửa sau khi xác nhận hoàn thành
 
     // Navigation properties
     public TechnicalSheet? TechnicalSheet { get; set; }

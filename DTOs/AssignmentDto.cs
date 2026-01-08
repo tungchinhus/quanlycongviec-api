@@ -123,6 +123,7 @@ public class MachineAssignmentDto
     public string? FilePath { get; set; }
     
     public int Status { get; set; }
+    public bool IsLocked { get; set; }
     public TechnicalSheetDto? TechnicalSheet { get; set; }
     public List<AssignmentApprovalDto>? AssignmentApprovals { get; set; }
     public List<WorkChangeDto>? WorkChanges { get; set; }

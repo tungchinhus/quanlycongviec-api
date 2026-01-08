@@ -8,6 +8,7 @@ using quanlyfilesBE.Services;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace quanlyfilesBE.Controllers;
 
@@ -400,6 +401,81 @@ public class TechnicalSheetsController : ControllerBase
             
             return StatusCode(500, errorDetails);
         }
+    }
+
+    // GET: api/technical-sheets/next-id
+    [HttpGet("next-id")]
+    public async Task<ActionResult<object>> GetNextTbktId()
+    {
+        try
+        {
+            var ids = await _context.TechnicalSheets
+                .Where(ts => !string.IsNullOrEmpty(ts.TBKT_ID))
+                .Select(ts => ts.TBKT_ID!)
+                .ToListAsync();
+
+            if (!ids.Any())
+            {
+                return Ok(new { nextTbktId = "1" });
+            }
+
+            var candidates = ids
+                .Select(id => new
+                {
+                    Raw = id.Trim(),
+                    Upper = id.Trim().ToUpperInvariant(),
+                    Numeric = ExtractNumericPart(id)
+                })
+                .Where(x => x.Numeric.HasValue)
+                .ToList();
+
+            if (!candidates.Any())
+            {
+                return Ok(new { nextTbktId = "1" });
+            }
+
+            var maxCandidate = candidates
+                .OrderByDescending(c => c.Numeric!.Value)
+                .ThenByDescending(c => c.Upper)
+                .First();
+
+            var nextNumber = maxCandidate.Numeric!.Value + 1;
+            var suffix = ExtractSuffix(maxCandidate.Upper);
+            var nextId = $"{nextNumber}{suffix}".Trim();
+
+            return Ok(new { nextTbktId = nextId });
+        }
+        catch (Exception ex)
+        {
+            var errorMsg = "Error generating next TBKT_ID";
+            _logger?.LogError(ex, errorMsg);
+            await _fileLogger.LogErrorAsync(errorMsg, ex);
+            return StatusCode(500, new { error = errorMsg, message = ex.Message });
+        }
+    }
+
+    private static int? ExtractNumericPart(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+        var match = Regex.Match(id, @"\d+");
+        if (match.Success && int.TryParse(match.Value, out var number))
+        {
+            return number;
+        }
+        return null;
+    }
+
+    private static string ExtractSuffix(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return string.Empty;
+        var match = Regex.Match(id.ToUpperInvariant(), @"^\s*\d+\s*([A-Z]+)?\s*$");
+        if (match.Success)
+        {
+            return match.Groups[1].Value ?? string.Empty;
+        }
+
+        var trailingLetters = new string(id.ToUpperInvariant().Reverse().TakeWhile(char.IsLetter).Reverse().ToArray());
+        return trailingLetters;
     }
 
     // GET: api/technical-sheets/{tbktId}

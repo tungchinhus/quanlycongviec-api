@@ -48,7 +48,7 @@ public class CreateTechnicalSheetDto
     [StringLength(255)]
     public string? VoltageSpec { get; set; }
 
-    public int? Phase { get; set; }
+    public int? Phase { get; set; } sds
 
     [StringLength(100)]
     public string? StandardCode { get; set; }
@@ -148,6 +148,18 @@ public class TechnicalSheetDto
     public DateTime? ArchivedDate { get; set; }
     public string? RequesterElectrical { get; set; }
     public string? RequesterMechanical { get; set; }
+    
+    // Approval workflow fields - ManagerL1 approval
+    public string? ManagerL1ApprovalStatus { get; set; }
+    public string? ManagerL1ApproverFirebaseUID { get; set; }
+    public DateTime? ManagerL1ApprovalDate { get; set; }
+    public string? ManagerL1ApprovalNotes { get; set; }
+    
+    // Approval workflow fields - Manager approval
+    public string? ManagerApprovalStatus { get; set; }
+    public string? ManagerApproverFirebaseUID { get; set; }
+    public DateTime? ManagerApprovalDate { get; set; }
+    public string? ManagerApprovalNotes { get; set; }
 }
 
 public class AssignmentApprovalDto
@@ -262,5 +274,19 @@ public class WorkItemWithAssignmentDto
     public bool? PersonConfirmation { get; set; }
     public string? Notes { get; set; }
     public MachineAssignmentDto? Assignment { get; set; }
+}
+
+public class ApproveTechnicalSheetDto
+{
+    [Required]
+    [StringLength(20)]
+    public string ApprovalLevel { get; set; } = string.Empty; // "ManagerL1" or "Manager"
+
+    [Required]
+    [StringLength(20)]
+    public string Action { get; set; } = string.Empty; // "approve" or "reject"
+
+    [StringLength(1000)]
+    public string? Notes { get; set; }
 }
 

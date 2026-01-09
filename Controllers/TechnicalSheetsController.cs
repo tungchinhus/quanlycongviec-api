@@ -31,9 +31,9 @@ public class TechnicalSheetsController : ControllerBase
         _fileLogger = fileLogger ?? new FileLoggerService();
     }
 
-    // GET: api/technical-sheets?firebaseUID={firebaseUID}
+    // GET: api/technical-sheets?firebaseUID={firebaseUID}&needsApproval={needsApproval}
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<TechnicalSheetDto>>> GetAll([FromQuery] string? firebaseUID = null)
+    public async Task<ActionResult<IEnumerable<TechnicalSheetDto>>> GetAll([FromQuery] string? firebaseUID = null, [FromQuery] bool? needsApproval = null)
     {
         try
         {
@@ -199,6 +199,61 @@ public class TechnicalSheetsController : ControllerBase
                     // Manager (managerL, managerL1, managerL2): trả về tất cả TechnicalSheets (bao gồm cả Proposer = NULL)
                     _logger?.LogInformation("GetAll: User is Admin/Manager, returning all TechnicalSheets (including NULL Proposer)");
                 }
+
+                // Filter theo needsApproval nếu có
+                // TechnicalSheet đã hoàn thành (có ArchivedDate) và cần approval
+                if (needsApproval == true && isAdminOrManager)
+                {
+                    // Kiểm tra role của user
+                    var isAdmin = RoleHelper.IsAdministrator(User);
+                    var isManager = RoleHelper.IsManager(User);
+                    
+                    // Kiểm tra xem user có phải ManagerL1 không
+                    var isManagerL1 = false;
+                    var isManagerOnly = false;
+                    var roleClaims = User?.Claims?.Where(c => c.Type == ClaimTypes.Role || 
+                                                              c.Type == "role" || 
+                                                              c.Type == "http://schemas.microsoft.com/ws/2008/06/identity/claims/role")
+                        .Select(c => c.Value)
+                        .ToList() ?? new List<string>();
+                    
+                    isManagerL1 = roleClaims.Any(role => 
+                        role != null && 
+                        role.Equals("ManagerL1", StringComparison.OrdinalIgnoreCase));
+                    
+                    isManagerOnly = isManager && !isManagerL1;
+
+                    // TechnicalSheet đã hoàn thành (có ArchivedDate)
+                    query = query.Where(s => s.ArchivedDate != null);
+
+                    if (isManagerL1)
+                    {
+                        // ManagerL1: thấy TechnicalSheet chưa có ManagerL1 approval hoặc đã reject
+                        query = query.Where(s => 
+                            string.IsNullOrEmpty(s.ManagerL1ApprovalStatus) || 
+                            s.ManagerL1ApprovalStatus == "Pending" ||
+                            s.ManagerL1ApprovalStatus == "Rejected");
+                        _logger?.LogInformation("GetAll: Filtering for ManagerL1 - sheets needing ManagerL1 approval");
+                    }
+                    else if (isManagerOnly)
+                    {
+                        // Manager: chỉ thấy TechnicalSheet đã được ManagerL1 approve nhưng chưa có Manager approval
+                        query = query.Where(s => 
+                            s.ManagerL1ApprovalStatus == "Approved" &&
+                            (string.IsNullOrEmpty(s.ManagerApprovalStatus) || 
+                             s.ManagerApprovalStatus == "Pending"));
+                        _logger?.LogInformation("GetAll: Filtering for Manager - sheets needing Manager approval (after ManagerL1 approved)");
+                    }
+                    else if (isAdmin)
+                    {
+                        // Admin: thấy tất cả TechnicalSheet đã hoàn thành cần approval (ở bất kỳ cấp nào)
+                        query = query.Where(s => 
+                            (string.IsNullOrEmpty(s.ManagerL1ApprovalStatus) || s.ManagerL1ApprovalStatus == "Pending") ||
+                            (s.ManagerL1ApprovalStatus == "Approved" && 
+                             (string.IsNullOrEmpty(s.ManagerApprovalStatus) || s.ManagerApprovalStatus == "Pending")));
+                        _logger?.LogInformation("GetAll: Filtering for Admin - sheets needing approval at any level");
+                    }
+                }
                 
                 // #region agent log
                 try {
@@ -348,7 +403,15 @@ public class TechnicalSheetsController : ControllerBase
                         HandOverDate = s.HandOverDate,
                         ArchivedDate = s.ArchivedDate,
                         RequesterElectrical = s.RequesterElectrical,
-                        RequesterMechanical = s.RequesterMechanical
+                        RequesterMechanical = s.RequesterMechanical,
+                        ManagerL1ApprovalStatus = s.ManagerL1ApprovalStatus,
+                        ManagerL1ApproverFirebaseUID = s.ManagerL1ApproverFirebaseUID,
+                        ManagerL1ApprovalDate = s.ManagerL1ApprovalDate,
+                        ManagerL1ApprovalNotes = s.ManagerL1ApprovalNotes,
+                        ManagerApprovalStatus = s.ManagerApprovalStatus,
+                        ManagerApproverFirebaseUID = s.ManagerApproverFirebaseUID,
+                        ManagerApprovalDate = s.ManagerApprovalDate,
+                        ManagerApprovalNotes = s.ManagerApprovalNotes
                     };
                     dtos.Add(dto);
                 }
@@ -507,7 +570,15 @@ public class TechnicalSheetsController : ControllerBase
                 HandOverDate = sheet.HandOverDate,
                 ArchivedDate = sheet.ArchivedDate,
                 RequesterElectrical = sheet.RequesterElectrical,
-                RequesterMechanical = sheet.RequesterMechanical
+                RequesterMechanical = sheet.RequesterMechanical,
+                ManagerL1ApprovalStatus = sheet.ManagerL1ApprovalStatus,
+                ManagerL1ApproverFirebaseUID = sheet.ManagerL1ApproverFirebaseUID,
+                ManagerL1ApprovalDate = sheet.ManagerL1ApprovalDate,
+                ManagerL1ApprovalNotes = sheet.ManagerL1ApprovalNotes,
+                ManagerApprovalStatus = sheet.ManagerApprovalStatus,
+                ManagerApproverFirebaseUID = sheet.ManagerApproverFirebaseUID,
+                ManagerApprovalDate = sheet.ManagerApprovalDate,
+                ManagerApprovalNotes = sheet.ManagerApprovalNotes
             };
             
             return Ok(dto);
@@ -600,7 +671,15 @@ public class TechnicalSheetsController : ControllerBase
                 HandOverDate = newSheet.HandOverDate,
                 ArchivedDate = newSheet.ArchivedDate,
                 RequesterElectrical = newSheet.RequesterElectrical,
-                RequesterMechanical = newSheet.RequesterMechanical
+                RequesterMechanical = newSheet.RequesterMechanical,
+                ManagerL1ApprovalStatus = newSheet.ManagerL1ApprovalStatus,
+                ManagerL1ApproverFirebaseUID = newSheet.ManagerL1ApproverFirebaseUID,
+                ManagerL1ApprovalDate = newSheet.ManagerL1ApprovalDate,
+                ManagerL1ApprovalNotes = newSheet.ManagerL1ApprovalNotes,
+                ManagerApprovalStatus = newSheet.ManagerApprovalStatus,
+                ManagerApproverFirebaseUID = newSheet.ManagerApproverFirebaseUID,
+                ManagerApprovalDate = newSheet.ManagerApprovalDate,
+                ManagerApprovalNotes = newSheet.ManagerApprovalNotes
             };
 
             return CreatedAtAction(nameof(GetById), new { tbktId = newSheet.TBKT_ID }, resultDto);
@@ -679,7 +758,15 @@ public class TechnicalSheetsController : ControllerBase
                 HandOverDate = sheet.HandOverDate,
                 ArchivedDate = sheet.ArchivedDate,
                 RequesterElectrical = sheet.RequesterElectrical,
-                RequesterMechanical = sheet.RequesterMechanical
+                RequesterMechanical = sheet.RequesterMechanical,
+                ManagerL1ApprovalStatus = sheet.ManagerL1ApprovalStatus,
+                ManagerL1ApproverFirebaseUID = sheet.ManagerL1ApproverFirebaseUID,
+                ManagerL1ApprovalDate = sheet.ManagerL1ApprovalDate,
+                ManagerL1ApprovalNotes = sheet.ManagerL1ApprovalNotes,
+                ManagerApprovalStatus = sheet.ManagerApprovalStatus,
+                ManagerApproverFirebaseUID = sheet.ManagerApproverFirebaseUID,
+                ManagerApprovalDate = sheet.ManagerApprovalDate,
+                ManagerApprovalNotes = sheet.ManagerApprovalNotes
             };
 
             return Ok(resultDto);
@@ -767,7 +854,7 @@ public class TechnicalSheetsController : ControllerBase
             
             var isAdminOrManager = RoleHelper.IsAdministratorOrManager(User);
             
-            User? user = null;
+            Models.User? user = null;
             
             // Tìm user theo FirebaseUID từ token
             if (!string.IsNullOrEmpty(userIdClaim))
@@ -882,8 +969,148 @@ public class TechnicalSheetsController : ControllerBase
         }
     }
 
+    // POST: api/technical-sheets/{tbktId}/approve
+    [HttpPost("{tbktId}/approve")]
+    public async Task<ActionResult<TechnicalSheetDto>> ApproveTechnicalSheet(string tbktId, [FromBody] ApproveTechnicalSheetDto dto)
+    {
+        try
+        {
+            var sheet = await _context.TechnicalSheets
+                .FirstOrDefaultAsync(ts => ts.TBKT_ID == tbktId);
+            
+            if (sheet == null)
+            {
+                return NotFound(new { message = $"TechnicalSheet with TBKT_ID '{tbktId}' not found" });
+            }
+
+            var currentUserFirebaseUID = User?.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+                ?? User?.FindFirst("sub")?.Value;
+            var currentUserEmail = User?.FindFirst(ClaimTypes.Email)?.Value 
+                ?? User?.FindFirst("email")?.Value;
+
+            // Tìm user trong database để lấy thông tin đầy đủ
+            Models.User? currentUser = null;
+            if (!string.IsNullOrEmpty(currentUserFirebaseUID))
+            {
+                currentUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.FirebaseUID == currentUserFirebaseUID);
+            }
+
+            // Kiểm tra role của user
+            var isAdmin = RoleHelper.IsAdministrator(User);
+            var isManager = RoleHelper.IsManager(User);
+            
+            // Kiểm tra xem user có phải ManagerL1 không
+            var isManagerL1 = false;
+            var roleClaims = User?.Claims?.Where(c => c.Type == ClaimTypes.Role || 
+                                                      c.Type == "role" || 
+                                                      c.Type == "http://schemas.microsoft.com/ws/2008/06/identity/claims/role")
+                .Select(c => c.Value)
+                .ToList() ?? new List<string>();
+            
+            isManagerL1 = roleClaims.Any(role => 
+                role != null && 
+                role.Equals("ManagerL1", StringComparison.OrdinalIgnoreCase));
+
+            // Kiểm tra xem user có phải Manager (không phải ManagerL1) không
+            var isManagerOnly = isManager && !isManagerL1;
+
+            // Kiểm tra quyền approve
+            if (dto.ApprovalLevel == "ManagerL1")
+            {
+                if (!isAdmin && !isManagerL1)
+                {
+                    return StatusCode(403, new { message = "Chỉ ManagerL1 hoặc Admin mới có quyền ký xác nhận cấp 1" });
+                }
+
+                // ManagerL1 chỉ có thể approve khi chưa có approval nào
+                if (!string.IsNullOrEmpty(sheet.ManagerL1ApprovalStatus) && sheet.ManagerL1ApprovalStatus != "Pending")
+                {
+                    return BadRequest(new { message = "TechnicalSheet này đã được xử lý ở cấp ManagerL1" });
+                }
+
+                // Set ManagerL1 approval
+                sheet.ManagerL1ApprovalStatus = dto.Action == "approve" ? "Approved" : "Rejected";
+                sheet.ManagerL1ApproverFirebaseUID = currentUserFirebaseUID;
+                sheet.ManagerL1ApprovalDate = DateTime.UtcNow;
+                sheet.ManagerL1ApprovalNotes = dto.Notes;
+            }
+            else if (dto.ApprovalLevel == "Manager")
+            {
+                if (!isAdmin && !isManagerOnly)
+                {
+                    return StatusCode(403, new { message = "Chỉ Manager hoặc Admin mới có quyền duyệt cuối cùng" });
+                }
+
+                // Manager chỉ có thể approve sau khi ManagerL1 đã approve
+                if (string.IsNullOrEmpty(sheet.ManagerL1ApprovalStatus) || sheet.ManagerL1ApprovalStatus != "Approved")
+                {
+                    return BadRequest(new { message = "TechnicalSheet này cần được ManagerL1 ký xác nhận trước" });
+                }
+
+                // Manager chỉ có thể approve khi chưa có approval
+                if (!string.IsNullOrEmpty(sheet.ManagerApprovalStatus) && sheet.ManagerApprovalStatus != "Pending")
+                {
+                    return BadRequest(new { message = "TechnicalSheet này đã được xử lý ở cấp Manager" });
+                }
+
+                // Set Manager approval
+                sheet.ManagerApprovalStatus = dto.Action == "approve" ? "Approved" : "Rejected";
+                sheet.ManagerApproverFirebaseUID = currentUserFirebaseUID;
+                sheet.ManagerApprovalDate = DateTime.UtcNow;
+                sheet.ManagerApprovalNotes = dto.Notes;
+            }
+            else
+            {
+                return BadRequest(new { message = "ApprovalLevel phải là 'ManagerL1' hoặc 'Manager'" });
+            }
+
+            await _context.SaveChangesAsync();
+
+            var resultDto = new TechnicalSheetDto
+            {
+                TBKT_ID = sheet.TBKT_ID,
+                Power_kVA = sheet.Power_kVA,
+                VoltageSpec = sheet.VoltageSpec,
+                Phase = sheet.Phase,
+                StandardCode = sheet.StandardCode,
+                Proposer = sheet.Proposer,
+                DeliveryDate = sheet.DeliveryDate,
+                DrawingDate = sheet.DrawingDate,
+                Notes = sheet.Notes,
+                SalesOrder = sheet.SalesOrder,
+                HandOverDate = sheet.HandOverDate,
+                ArchivedDate = sheet.ArchivedDate,
+                RequesterElectrical = sheet.RequesterElectrical,
+                RequesterMechanical = sheet.RequesterMechanical,
+                ManagerL1ApprovalStatus = sheet.ManagerL1ApprovalStatus,
+                ManagerL1ApproverFirebaseUID = sheet.ManagerL1ApproverFirebaseUID,
+                ManagerL1ApprovalDate = sheet.ManagerL1ApprovalDate,
+                ManagerL1ApprovalNotes = sheet.ManagerL1ApprovalNotes,
+                ManagerApprovalStatus = sheet.ManagerApprovalStatus,
+                ManagerApproverFirebaseUID = sheet.ManagerApproverFirebaseUID,
+                ManagerApprovalDate = sheet.ManagerApprovalDate,
+                ManagerApprovalNotes = sheet.ManagerApprovalNotes
+            };
+
+            _logger?.LogInformation("TechnicalSheet approval submitted: {TBKT_ID}, Level: {Level}, Action: {Action}", 
+                tbktId, dto.ApprovalLevel, dto.Action);
+            await _fileLogger.LogInfoAsync($"TechnicalSheetsController.ApproveTechnicalSheet: {dto.Action} submitted for {tbktId} at level {dto.ApprovalLevel}");
+
+            return Ok(resultDto);
+        }
+        catch (Exception ex)
+        {
+            var errorMsg = $"Error approving TechnicalSheet with TBKT_ID: {tbktId}";
+            _logger?.LogError(ex, errorMsg);
+            var additionalInfo = $"TBKT_ID: {tbktId}, ApprovalLevel: {dto?.ApprovalLevel}, Action: {dto?.Action}";
+            await _fileLogger.LogErrorAsync(errorMsg, ex, additionalInfo);
+            return StatusCode(500, new { error = "Error approving TechnicalSheet", message = ex.Message });
+        }
+    }
+
     // Helper method để lấy user hiện tại từ FirebaseUID hoặc Email
-    private async Task<User?> GetCurrentUserAsync(string? userIdClaim)
+    private async Task<Models.User?> GetCurrentUserAsync(string? userIdClaim)
     {
         if (string.IsNullOrEmpty(userIdClaim))
         {

@@ -60,7 +60,7 @@ public class UsersController : ControllerBase
             }
             
             // KHÔNG FILTER THEO IsActive - LẤY TẤT CẢ USERS TỪ DB
-            // KHÔNG LẤY TỪ FIREBASE - CHỈ LẤY TỪ POSTGRESQL DATABASE
+            // KHÔNG LẤY TỪ FIREBASE - CHỈ LẤY TỪ SQL SERVER DATABASE
 
             var totalCount = await query.CountAsync();
             _logger?.LogInformation("Total users after filter: {Count}", totalCount);
@@ -377,16 +377,65 @@ public class UsersController : ControllerBase
             user.UserName = dto.UserName;
         }
 
+        // Track changes để update Firebase
+        bool fullNameChanged = false;
+        bool emailChanged = false;
+
         if (dto.FullName != null)
+        {
+            fullNameChanged = user.FullName != dto.FullName;
             user.FullName = dto.FullName;
+        }
 
         if (dto.Email != null)
+        {
+            emailChanged = user.Email != dto.Email;
             user.Email = dto.Email;
+        }
 
         // Chỉ Admin/Manager mới có thể thay đổi IsActive
         if (dto.IsActive.HasValue && (isAdmin || isManager))
         {
             user.IsActive = dto.IsActive.Value;
+        }
+
+        // Update user info trên Firebase nếu có thay đổi
+        if (!string.IsNullOrEmpty(user.FirebaseUID) && (fullNameChanged || emailChanged))
+        {
+            try
+            {
+                await _firebaseService.UpdateUserAsync(
+                    user.FirebaseUID,
+                    emailChanged ? user.Email : null,
+                    fullNameChanged ? user.FullName : null
+                );
+                _logger?.LogInformation("Updated Firebase user info for user {UserId}: Email={EmailChanged}, DisplayName={DisplayNameChanged}", 
+                    user.UserId, emailChanged, fullNameChanged);
+
+                // Nếu fullName thay đổi, cũng cần update custom claims với name mới
+                if (fullNameChanged && !string.IsNullOrEmpty(user.FullName))
+                {
+                    // Lấy roles hiện tại từ DB để update custom claims
+                    var currentRoles = await _db.UserRoles
+                        .Where(ur => ur.UserId == user.UserId)
+                        .Include(ur => ur.Role)
+                        .Select(ur => ur.Role.RoleName)
+                        .ToListAsync();
+
+                    var claims = new Dictionary<string, object>
+                    {
+                        { "roles", currentRoles }
+                    };
+                    claims["name"] = user.FullName;
+                    await _firebaseService.SetCustomClaimsAsync(user.FirebaseUID, claims);
+                    _logger?.LogInformation("Updated Firebase custom claims with new name for user {UserId}", user.UserId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to update Firebase user info for user {UserId}", user.UserId);
+                // Không throw error, chỉ log warning - DB đã được update
+            }
         }
 
         // Cập nhật roles nếu có (chỉ Admin/Manager)
@@ -2354,7 +2403,7 @@ public class UsersController : ControllerBase
 
     // GET: api/users/all
     // Endpoint để lấy tất cả users không phân trang (để debug)
-    // CHỈ LẤY TỪ DATABASE POSTGRESQL - KHÔNG LẤY TỪ FIREBASE HAY HARDCODE
+    // CHỈ LẤY TỪ DATABASE SQL SERVER - KHÔNG LẤY TỪ FIREBASE HAY HARDCODE
     [HttpGet("all")]
     [AllowAnonymous]
     public async Task<IActionResult> GetAllUsersNoPagination()

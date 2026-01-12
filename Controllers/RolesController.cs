@@ -22,15 +22,15 @@ public class RolesController : ControllerBase
     }
 
     // GET: api/roles
-    // CHỈ LẤY TỪ DATABASE POSTGRESQL - KHÔNG LẤY TỪ FIREBASE HAY CACHE
+    // CHỈ LẤY TỪ DATABASE SQL SERVER - KHÔNG LẤY TỪ FIREBASE HAY CACHE
     [HttpGet]
     public async Task<IActionResult> GetAllRoles()
     {
         try
         {
-            // CHỈ LẤY TỪ DATABASE POSTGRESQL - DÙNG ADO.NET RAW SQL HOÀN TOÀN
+            // CHỈ LẤY TỪ DATABASE SQL SERVER - DÙNG ADO.NET RAW SQL HOÀN TOÀN
             // BYPASS ENTITY FRAMEWORK ĐỂ ĐẢM BẢO LẤY ĐÚNG DỮ LIỆU TỪ DB
-            _logger?.LogInformation("GetAllRoles called - Lấy roles từ PostgreSQL database bằng ADO.NET RAW SQL");
+            _logger?.LogInformation("GetAllRoles called - Lấy roles từ SQL Server database bằng ADO.NET RAW SQL");
 
             var roleDtos = new List<RoleDto>();
             var connection = _db.Database.GetDbConnection();

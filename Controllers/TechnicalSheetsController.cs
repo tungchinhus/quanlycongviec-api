@@ -31,6 +31,54 @@ public class TechnicalSheetsController : ControllerBase
         _fileLogger = fileLogger ?? new FileLoggerService();
     }
 
+    // Helper method để map TechnicalSheet sang DTO (bao gồm approvals từ bảng mới)
+    private async Task<TechnicalSheetDto> MapToDtoAsync(TechnicalSheet sheet)
+    {
+        var approvals = await _context.TechnicalSheetApprovals
+            .Where(a => a.TBKT_ID == sheet.TBKT_ID)
+            .OrderByDescending(a => a.ApprovalDate)
+            .Select(a => new TechnicalSheetApprovalDto
+            {
+                ApprovalID = a.ApprovalID,
+                TBKT_ID = a.TBKT_ID,
+                ApprovalLevel = a.ApprovalLevel,
+                ApprovalStatus = a.ApprovalStatus,
+                ApproverFirebaseUID = a.ApproverFirebaseUID,
+                ApproverName = a.ApproverName,
+                ApprovalDate = a.ApprovalDate,
+                Notes = a.Notes,
+                CreatedAt = a.CreatedAt
+            })
+            .ToListAsync();
+
+        return new TechnicalSheetDto
+        {
+            TBKT_ID = sheet.TBKT_ID,
+            Power_kVA = sheet.Power_kVA,
+            VoltageSpec = sheet.VoltageSpec,
+            Phase = sheet.Phase,
+            StandardCode = sheet.StandardCode,
+            Proposer = sheet.Proposer,
+            DeliveryDate = sheet.DeliveryDate,
+            DrawingDate = sheet.DrawingDate,
+            Notes = sheet.Notes,
+            SalesOrder = sheet.SalesOrder,
+            HandOverDate = sheet.HandOverDate,
+            ArchivedDate = sheet.ArchivedDate,
+            RequesterElectrical = sheet.RequesterElectrical,
+            RequesterMechanical = sheet.RequesterMechanical,
+            ManagerL1ApprovalStatus = sheet.ManagerL1ApprovalStatus,
+            ManagerL1ApproverFirebaseUID = sheet.ManagerL1ApproverFirebaseUID,
+            ManagerL1ApprovalDate = sheet.ManagerL1ApprovalDate,
+            ManagerL1ApprovalNotes = sheet.ManagerL1ApprovalNotes,
+            ManagerApprovalStatus = sheet.ManagerApprovalStatus,
+            ManagerApproverFirebaseUID = sheet.ManagerApproverFirebaseUID,
+            ManagerApprovalDate = sheet.ManagerApprovalDate,
+            ManagerApprovalNotes = sheet.ManagerApprovalNotes,
+            TechnicalSheetApprovals = approvals
+        };
+    }
+
     // GET: api/technical-sheets?firebaseUID={firebaseUID}&needsApproval={needsApproval}
     [HttpGet]
     public async Task<ActionResult<IEnumerable<TechnicalSheetDto>>> GetAll([FromQuery] string? firebaseUID = null, [FromQuery] bool? needsApproval = null)
@@ -382,6 +430,30 @@ public class TechnicalSheetsController : ControllerBase
                     System.Text.Json.JsonSerializer.Serialize(proposerInfo));
             }
             
+            // Load tất cả approvals một lần (tối ưu hiệu suất)
+            var tbktIds = sheets.Select(s => s.TBKT_ID).Where(id => !string.IsNullOrEmpty(id)).ToList();
+            var allApprovals = await _context.TechnicalSheetApprovals
+                .Where(a => tbktIds.Contains(a.TBKT_ID))
+                .OrderByDescending(a => a.ApprovalDate)
+                .Select(a => new TechnicalSheetApprovalDto
+                {
+                    ApprovalID = a.ApprovalID,
+                    TBKT_ID = a.TBKT_ID,
+                    ApprovalLevel = a.ApprovalLevel,
+                    ApprovalStatus = a.ApprovalStatus,
+                    ApproverFirebaseUID = a.ApproverFirebaseUID,
+                    ApproverName = a.ApproverName,
+                    ApprovalDate = a.ApprovalDate,
+                    Notes = a.Notes,
+                    CreatedAt = a.CreatedAt
+                })
+                .ToListAsync();
+            
+            // Group approvals theo TBKT_ID
+            var approvalsByTBKT = allApprovals
+                .GroupBy(a => a.TBKT_ID)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
             // Map to DTOs with safe type conversion
             var dtos = new List<TechnicalSheetDto>();
             foreach (var s in sheets)
@@ -411,7 +483,11 @@ public class TechnicalSheetsController : ControllerBase
                         ManagerApprovalStatus = s.ManagerApprovalStatus,
                         ManagerApproverFirebaseUID = s.ManagerApproverFirebaseUID,
                         ManagerApprovalDate = s.ManagerApprovalDate,
-                        ManagerApprovalNotes = s.ManagerApprovalNotes
+                        ManagerApprovalNotes = s.ManagerApprovalNotes,
+                        // Load lịch sử approvals từ bảng mới (đã được load trước đó)
+                        TechnicalSheetApprovals = approvalsByTBKT.ContainsKey(s.TBKT_ID) 
+                            ? approvalsByTBKT[s.TBKT_ID] 
+                            : new List<TechnicalSheetApprovalDto>()
                     };
                     dtos.Add(dto);
                 }
@@ -555,31 +631,8 @@ public class TechnicalSheetsController : ControllerBase
                 return NotFound(new { message = $"TechnicalSheet with TBKT_ID '{tbktId}' not found" });
             }
             
-            var dto = new TechnicalSheetDto
-            {
-                TBKT_ID = sheet.TBKT_ID,
-                Power_kVA = sheet.Power_kVA,
-                VoltageSpec = sheet.VoltageSpec,
-                Phase = sheet.Phase,
-                StandardCode = sheet.StandardCode,
-                Proposer = sheet.Proposer,
-                DeliveryDate = sheet.DeliveryDate,
-                DrawingDate = sheet.DrawingDate,
-                Notes = sheet.Notes,
-                SalesOrder = sheet.SalesOrder,
-                HandOverDate = sheet.HandOverDate,
-                ArchivedDate = sheet.ArchivedDate,
-                RequesterElectrical = sheet.RequesterElectrical,
-                RequesterMechanical = sheet.RequesterMechanical,
-                ManagerL1ApprovalStatus = sheet.ManagerL1ApprovalStatus,
-                ManagerL1ApproverFirebaseUID = sheet.ManagerL1ApproverFirebaseUID,
-                ManagerL1ApprovalDate = sheet.ManagerL1ApprovalDate,
-                ManagerL1ApprovalNotes = sheet.ManagerL1ApprovalNotes,
-                ManagerApprovalStatus = sheet.ManagerApprovalStatus,
-                ManagerApproverFirebaseUID = sheet.ManagerApproverFirebaseUID,
-                ManagerApprovalDate = sheet.ManagerApprovalDate,
-                ManagerApprovalNotes = sheet.ManagerApprovalNotes
-            };
+            // Map sang DTO với approvals từ bảng mới
+            var dto = await MapToDtoAsync(sheet);
             
             return Ok(dto);
         }
@@ -656,31 +709,8 @@ public class TechnicalSheetsController : ControllerBase
             _context.TechnicalSheets.Add(newSheet);
             await _context.SaveChangesAsync();
 
-            var resultDto = new TechnicalSheetDto
-            {
-                TBKT_ID = newSheet.TBKT_ID,
-                Power_kVA = newSheet.Power_kVA,
-                VoltageSpec = newSheet.VoltageSpec,
-                Phase = newSheet.Phase,
-                StandardCode = newSheet.StandardCode,
-                Proposer = newSheet.Proposer,
-                DeliveryDate = newSheet.DeliveryDate,
-                DrawingDate = newSheet.DrawingDate,
-                Notes = newSheet.Notes,
-                SalesOrder = newSheet.SalesOrder,
-                HandOverDate = newSheet.HandOverDate,
-                ArchivedDate = newSheet.ArchivedDate,
-                RequesterElectrical = newSheet.RequesterElectrical,
-                RequesterMechanical = newSheet.RequesterMechanical,
-                ManagerL1ApprovalStatus = newSheet.ManagerL1ApprovalStatus,
-                ManagerL1ApproverFirebaseUID = newSheet.ManagerL1ApproverFirebaseUID,
-                ManagerL1ApprovalDate = newSheet.ManagerL1ApprovalDate,
-                ManagerL1ApprovalNotes = newSheet.ManagerL1ApprovalNotes,
-                ManagerApprovalStatus = newSheet.ManagerApprovalStatus,
-                ManagerApproverFirebaseUID = newSheet.ManagerApproverFirebaseUID,
-                ManagerApprovalDate = newSheet.ManagerApprovalDate,
-                ManagerApprovalNotes = newSheet.ManagerApprovalNotes
-            };
+            // Map sang DTO với approvals từ bảng mới (mới tạo nên chưa có approvals)
+            var resultDto = await MapToDtoAsync(newSheet);
 
             return CreatedAtAction(nameof(GetById), new { tbktId = newSheet.TBKT_ID }, resultDto);
         }
@@ -743,31 +773,8 @@ public class TechnicalSheetsController : ControllerBase
 
             await _context.SaveChangesAsync();
 
-            var resultDto = new TechnicalSheetDto
-            {
-                TBKT_ID = sheet.TBKT_ID,
-                Power_kVA = sheet.Power_kVA,
-                VoltageSpec = sheet.VoltageSpec,
-                Phase = sheet.Phase,
-                StandardCode = sheet.StandardCode,
-                Proposer = sheet.Proposer,
-                DeliveryDate = sheet.DeliveryDate,
-                DrawingDate = sheet.DrawingDate,
-                Notes = sheet.Notes,
-                SalesOrder = sheet.SalesOrder,
-                HandOverDate = sheet.HandOverDate,
-                ArchivedDate = sheet.ArchivedDate,
-                RequesterElectrical = sheet.RequesterElectrical,
-                RequesterMechanical = sheet.RequesterMechanical,
-                ManagerL1ApprovalStatus = sheet.ManagerL1ApprovalStatus,
-                ManagerL1ApproverFirebaseUID = sheet.ManagerL1ApproverFirebaseUID,
-                ManagerL1ApprovalDate = sheet.ManagerL1ApprovalDate,
-                ManagerL1ApprovalNotes = sheet.ManagerL1ApprovalNotes,
-                ManagerApprovalStatus = sheet.ManagerApprovalStatus,
-                ManagerApproverFirebaseUID = sheet.ManagerApproverFirebaseUID,
-                ManagerApprovalDate = sheet.ManagerApprovalDate,
-                ManagerApprovalNotes = sheet.ManagerApprovalNotes
-            };
+            // Map sang DTO với approvals từ bảng mới
+            var resultDto = await MapToDtoAsync(sheet);
 
             return Ok(resultDto);
         }
@@ -1029,11 +1036,25 @@ public class TechnicalSheetsController : ControllerBase
                     return BadRequest(new { message = "TechnicalSheet này đã được xử lý ở cấp ManagerL1" });
                 }
 
-                // Set ManagerL1 approval
+                // Set ManagerL1 approval (DEPRECATED: Giữ để tương thích ngược)
                 sheet.ManagerL1ApprovalStatus = dto.Action == "approve" ? "Approved" : "Rejected";
                 sheet.ManagerL1ApproverFirebaseUID = currentUserFirebaseUID;
                 sheet.ManagerL1ApprovalDate = DateTime.UtcNow;
                 sheet.ManagerL1ApprovalNotes = dto.Notes;
+
+                // Ghi vào bảng TechnicalSheetApproval mới (lưu lịch sử)
+                var approval = new Models.TechnicalSheetApproval
+                {
+                    TBKT_ID = tbktId,
+                    ApprovalLevel = "ManagerL1",
+                    ApprovalStatus = dto.Action == "approve" ? "Approved" : "Rejected",
+                    ApproverFirebaseUID = currentUserFirebaseUID ?? string.Empty,
+                    ApproverName = currentUser?.FullName ?? currentUserEmail ?? "Unknown",
+                    ApprovalDate = DateTime.UtcNow,
+                    Notes = dto.Notes,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.TechnicalSheetApprovals.Add(approval);
             }
             else if (dto.ApprovalLevel == "Manager")
             {
@@ -1054,11 +1075,25 @@ public class TechnicalSheetsController : ControllerBase
                     return BadRequest(new { message = "TechnicalSheet này đã được xử lý ở cấp Manager" });
                 }
 
-                // Set Manager approval
+                // Set Manager approval (DEPRECATED: Giữ để tương thích ngược)
                 sheet.ManagerApprovalStatus = dto.Action == "approve" ? "Approved" : "Rejected";
                 sheet.ManagerApproverFirebaseUID = currentUserFirebaseUID;
                 sheet.ManagerApprovalDate = DateTime.UtcNow;
                 sheet.ManagerApprovalNotes = dto.Notes;
+
+                // Ghi vào bảng TechnicalSheetApproval mới (lưu lịch sử)
+                var approval = new Models.TechnicalSheetApproval
+                {
+                    TBKT_ID = tbktId,
+                    ApprovalLevel = "Manager",
+                    ApprovalStatus = dto.Action == "approve" ? "Approved" : "Rejected",
+                    ApproverFirebaseUID = currentUserFirebaseUID ?? string.Empty,
+                    ApproverName = currentUser?.FullName ?? currentUserEmail ?? "Unknown",
+                    ApprovalDate = DateTime.UtcNow,
+                    Notes = dto.Notes,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.TechnicalSheetApprovals.Add(approval);
             }
             else
             {
@@ -1067,31 +1102,8 @@ public class TechnicalSheetsController : ControllerBase
 
             await _context.SaveChangesAsync();
 
-            var resultDto = new TechnicalSheetDto
-            {
-                TBKT_ID = sheet.TBKT_ID,
-                Power_kVA = sheet.Power_kVA,
-                VoltageSpec = sheet.VoltageSpec,
-                Phase = sheet.Phase,
-                StandardCode = sheet.StandardCode,
-                Proposer = sheet.Proposer,
-                DeliveryDate = sheet.DeliveryDate,
-                DrawingDate = sheet.DrawingDate,
-                Notes = sheet.Notes,
-                SalesOrder = sheet.SalesOrder,
-                HandOverDate = sheet.HandOverDate,
-                ArchivedDate = sheet.ArchivedDate,
-                RequesterElectrical = sheet.RequesterElectrical,
-                RequesterMechanical = sheet.RequesterMechanical,
-                ManagerL1ApprovalStatus = sheet.ManagerL1ApprovalStatus,
-                ManagerL1ApproverFirebaseUID = sheet.ManagerL1ApproverFirebaseUID,
-                ManagerL1ApprovalDate = sheet.ManagerL1ApprovalDate,
-                ManagerL1ApprovalNotes = sheet.ManagerL1ApprovalNotes,
-                ManagerApprovalStatus = sheet.ManagerApprovalStatus,
-                ManagerApproverFirebaseUID = sheet.ManagerApproverFirebaseUID,
-                ManagerApprovalDate = sheet.ManagerApprovalDate,
-                ManagerApprovalNotes = sheet.ManagerApprovalNotes
-            };
+            // Map sang DTO với approvals từ bảng mới
+            var resultDto = await MapToDtoAsync(sheet);
 
             _logger?.LogInformation("TechnicalSheet approval submitted: {TBKT_ID}, Level: {Level}, Action: {Action}", 
                 tbktId, dto.ApprovalLevel, dto.Action);

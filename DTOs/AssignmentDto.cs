@@ -48,7 +48,7 @@ public class CreateTechnicalSheetDto
     [StringLength(255)]
     public string? VoltageSpec { get; set; }
 
-    public int? Phase { get; set; } sds
+    public int? Phase { get; set; }
 
     [StringLength(100)]
     public string? StandardCode { get; set; }
@@ -160,6 +160,9 @@ public class TechnicalSheetDto
     public string? ManagerApproverFirebaseUID { get; set; }
     public DateTime? ManagerApprovalDate { get; set; }
     public string? ManagerApprovalNotes { get; set; }
+    
+    // Lịch sử approvals từ bảng TechnicalSheetApproval (mới)
+    public List<TechnicalSheetApprovalDto>? TechnicalSheetApprovals { get; set; }
 }
 
 public class AssignmentApprovalDto
@@ -170,6 +173,19 @@ public class AssignmentApprovalDto
     public string? ApproverName { get; set; }
     public DateTime? ApprovalDate { get; set; }
     public string? Notes { get; set; }
+}
+
+public class TechnicalSheetApprovalDto
+{
+    public int ApprovalID { get; set; }
+    public string TBKT_ID { get; set; } = string.Empty;
+    public string ApprovalLevel { get; set; } = string.Empty; // 'ManagerL1' hoặc 'Manager'
+    public string ApprovalStatus { get; set; } = string.Empty; // 'Pending', 'Approved', 'Rejected'
+    public string ApproverFirebaseUID { get; set; } = string.Empty;
+    public string ApproverName { get; set; } = string.Empty;
+    public DateTime ApprovalDate { get; set; }
+    public string? Notes { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
 public class CreateAssignmentApprovalDto

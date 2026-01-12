@@ -23,6 +23,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<TechnicalSheet> TechnicalSheets { get; set; }
     public DbSet<MachineAssignment> MachineAssignments { get; set; }
     public DbSet<AssignmentApproval> AssignmentApprovals { get; set; }
+    public DbSet<TechnicalSheetApproval> TechnicalSheetApprovals { get; set; }
     public DbSet<WorkChange> WorkChanges { get; set; }
     public DbSet<WorkItem> WorkItems { get; set; }
     public DbSet<TechnicalNotification> TechnicalNotifications { get; set; }
@@ -268,6 +269,56 @@ public class ApplicationDbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
             
             entity.HasIndex(e => e.AssignmentID);
+        });
+
+        // TechnicalSheetApproval
+        modelBuilder.Entity<TechnicalSheetApproval>(entity =>
+        {
+            entity.ToTable("TechnicalSheetApproval");
+            entity.HasKey(e => e.ApprovalID);
+            entity.Property(e => e.ApprovalID)
+                .ValueGeneratedOnAdd()
+                .HasColumnType("int");
+            entity.Property(e => e.TBKT_ID)
+                .IsRequired()
+                .HasMaxLength(50)
+                .HasColumnType("varchar(50)");
+            entity.Property(e => e.ApprovalLevel)
+                .IsRequired()
+                .HasMaxLength(20)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ApprovalStatus)
+                .IsRequired()
+                .HasMaxLength(20)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ApproverFirebaseUID)
+                .IsRequired()
+                .HasMaxLength(200)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ApproverName)
+                .IsRequired()
+                .HasMaxLength(100)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.ApprovalDate)
+                .IsRequired()
+                .HasColumnType("datetime2");
+            entity.Property(e => e.Notes)
+                .HasMaxLength(1000)
+                .HasColumnType("nvarchar");
+            entity.Property(e => e.CreatedAt)
+                .IsRequired()
+                .HasColumnType("datetime2")
+                .HasDefaultValueSql("GETUTCDATE()");
+            
+            entity.HasOne(e => e.TechnicalSheet)
+                  .WithMany()
+                  .HasForeignKey(e => e.TBKT_ID)
+                  .OnDelete(DeleteBehavior.Cascade);
+            
+            entity.HasIndex(e => e.TBKT_ID);
+            entity.HasIndex(e => e.ApprovalLevel);
+            entity.HasIndex(e => e.ApprovalStatus);
+            entity.HasIndex(e => e.ApprovalDate);
         });
 
         // WorkChange

@@ -7,6 +7,7 @@ namespace quanlyfilesBE.Services;
 public interface IFirebaseService
 {
     Task<UserRecord> CreateUserAsync(string email, string password, string? displayName = null);
+    Task<UserRecord> UpdateUserAsync(string uid, string? email = null, string? displayName = null);
     Task SetCustomClaimsAsync(string uid, Dictionary<string, object> claims);
     Task<UserRecord?> GetUserAsync(string uid);
     Task DeleteUserAsync(string uid);
@@ -134,6 +135,37 @@ public class FirebaseService : IFirebaseService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating Firebase user");
+            throw;
+        }
+    }
+
+    public async Task<UserRecord> UpdateUserAsync(string uid, string? email = null, string? displayName = null)
+    {
+        try
+        {
+            var args = new UserRecordArgs
+            {
+                Uid = uid
+            };
+
+            if (email != null)
+            {
+                args.Email = email;
+            }
+
+            if (displayName != null)
+            {
+                args.DisplayName = displayName;
+            }
+
+            var userRecord = await FirebaseAuth.DefaultInstance.UpdateUserAsync(args);
+            _logger.LogInformation("Firebase user updated: {Uid}, Email: {Email}, DisplayName: {DisplayName}", 
+                uid, email ?? "unchanged", displayName ?? "unchanged");
+            return userRecord;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating Firebase user: {Uid}", uid);
             throw;
         }
     }

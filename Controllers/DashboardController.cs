@@ -290,5 +290,235 @@ public class DashboardController : ControllerBase
             return StatusCode(500, new { error = "Error retrieving dashboard stats", message = ex.Message });
         }
     }
+
+    [HttpGet("manager-stats")]
+    public async Task<ActionResult<object>> GetManagerStats()
+    {
+        try
+        {
+            // Lấy FirebaseUID từ JWT token
+            var firebaseUID = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+                             ?? User.FindFirst("sub")?.Value;
+            
+            _logger?.LogInformation("Dashboard GetManagerStats - FirebaseUID from token: {FirebaseUID}", firebaseUID ?? "NULL");
+            
+            if (string.IsNullOrEmpty(firebaseUID))
+            {
+                _logger?.LogWarning("Dashboard GetManagerStats - No FirebaseUID found in token");
+                return Unauthorized(new { error = "Invalid user token" });
+            }
+
+            // Lấy thông tin user từ FirebaseUID
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.FirebaseUID == firebaseUID);
+            
+            if (user == null)
+            {
+                var emailClaim = User.FindFirst(ClaimTypes.Email)?.Value 
+                                ?? User.FindFirst("email")?.Value;
+                
+                if (!string.IsNullOrEmpty(emailClaim))
+                {
+                    user = await _context.Users
+                        .FirstOrDefaultAsync(u => u.Email == emailClaim);
+                }
+                
+                if (user == null)
+                {
+                    return NotFound(new { error = "User not found" });
+                }
+            }
+
+            // Lấy tất cả TechnicalSheets để thống kê approval
+            var allTechnicalSheets = await _context.TechnicalSheets.ToListAsync();
+            
+            // Thống kê approval status
+            var totalSheets = allTechnicalSheets.Count;
+            var pendingManagerL1 = allTechnicalSheets.Count(ts => 
+                string.IsNullOrEmpty(ts.ManagerL1ApprovalStatus) || 
+                ts.ManagerL1ApprovalStatus == "Pending");
+            var approvedManagerL1 = allTechnicalSheets.Count(ts => 
+                ts.ManagerL1ApprovalStatus == "Approved");
+            var rejectedManagerL1 = allTechnicalSheets.Count(ts => 
+                ts.ManagerL1ApprovalStatus == "Rejected");
+            
+            var pendingManager = allTechnicalSheets.Count(ts => 
+                ts.ManagerL1ApprovalStatus == "Approved" && 
+                (string.IsNullOrEmpty(ts.ManagerApprovalStatus) || 
+                 ts.ManagerApprovalStatus == "Pending"));
+            var approvedManager = allTechnicalSheets.Count(ts => 
+                ts.ManagerApprovalStatus == "Approved");
+            var rejectedManager = allTechnicalSheets.Count(ts => 
+                ts.ManagerApprovalStatus == "Rejected");
+            var fullyApproved = allTechnicalSheets.Count(ts => 
+                ts.ManagerL1ApprovalStatus == "Approved" && 
+                ts.ManagerApprovalStatus == "Approved");
+
+            // Thống kê tất cả WorkItems
+            var allWorkItems = await _context.WorkItems.ToListAsync();
+            var totalWorkItems = allWorkItems.Count;
+            var completedWorkItems = allWorkItems.Count(wi => wi.ActualFinish.HasValue);
+            var pendingWorkItems = allWorkItems.Count(wi => 
+                !wi.ActualFinish.HasValue && 
+                (wi.PersonConfirmation != true));
+            var confirmedWorkItems = allWorkItems.Count(wi => wi.PersonConfirmation == true);
+            var overdueWorkItems = allWorkItems.Count(wi => 
+                !wi.ActualFinish.HasValue && 
+                (wi.PersonConfirmation != true) &&
+                wi.ExpectedFinish.HasValue && 
+                wi.ExpectedFinish.Value < DateTime.UtcNow);
+            
+            var workItemsCompletionRate = totalWorkItems > 0 
+                ? Math.Round((double)completedWorkItems / totalWorkItems * 100, 2) 
+                : 0;
+
+            // Thống kê tất cả Assignments
+            var allAssignments = await _context.MachineAssignments.ToListAsync();
+            var totalAssignments = allAssignments.Count;
+            var newAssignments = allAssignments.Count(a => a.Status == 1);
+            var inProgressAssignments = allAssignments.Count(a => a.Status == 2);
+            var completedAssignments = allAssignments.Count(a => a.Status == 3);
+
+            // Thống kê theo WorkType
+            var workItemsByType = allWorkItems
+                .Where(wi => !string.IsNullOrEmpty(wi.WorkType))
+                .GroupBy(wi => wi.WorkType)
+                .Select(g => new { WorkType = g.Key, Count = g.Count() })
+                .OrderByDescending(x => x.Count)
+                .ToList();
+
+            // Thống kê theo tháng (6 tháng gần nhất) - Tất cả work items
+            var monthlyStats = new List<object>();
+            for (int i = 5; i >= 0; i--)
+            {
+                var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1).AddMonths(-i);
+                var monthEnd = monthStart.AddMonths(1);
+                
+                var monthWorkItems = allWorkItems
+                    .Where(wi => wi.StartDate.HasValue && 
+                               wi.StartDate.Value >= monthStart && 
+                               wi.StartDate.Value < monthEnd)
+                    .ToList();
+
+                monthlyStats.Add(new
+                {
+                    Month = monthStart.ToString("yyyy-MM"),
+                    MonthName = monthStart.ToString("MM/yyyy"),
+                    Total = monthWorkItems.Count,
+                    Completed = monthWorkItems.Count(wi => wi.ActualFinish.HasValue),
+                    Pending = monthWorkItems.Count(wi => !wi.ActualFinish.HasValue)
+                });
+            }
+
+            // Thống kê approval theo tháng (6 tháng gần nhất)
+            var approvalMonthlyStats = new List<object>();
+            for (int i = 5; i >= 0; i--)
+            {
+                var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1).AddMonths(-i);
+                var monthEnd = monthStart.AddMonths(1);
+                
+                var monthApprovalsL1 = allTechnicalSheets
+                    .Where(ts => ts.ManagerL1ApprovalDate.HasValue &&
+                               ts.ManagerL1ApprovalDate.Value >= monthStart &&
+                               ts.ManagerL1ApprovalDate.Value < monthEnd)
+                    .ToList();
+
+                var monthApprovalsManager = allTechnicalSheets
+                    .Where(ts => ts.ManagerApprovalDate.HasValue &&
+                               ts.ManagerApprovalDate.Value >= monthStart &&
+                               ts.ManagerApprovalDate.Value < monthEnd)
+                    .ToList();
+
+                approvalMonthlyStats.Add(new
+                {
+                    Month = monthStart.ToString("yyyy-MM"),
+                    MonthName = monthStart.ToString("MM/yyyy"),
+                    ManagerL1Approved = monthApprovalsL1.Count(ts => ts.ManagerL1ApprovalStatus == "Approved"),
+                    ManagerL1Rejected = monthApprovalsL1.Count(ts => ts.ManagerL1ApprovalStatus == "Rejected"),
+                    ManagerApproved = monthApprovalsManager.Count(ts => ts.ManagerApprovalStatus == "Approved"),
+                    ManagerRejected = monthApprovalsManager.Count(ts => ts.ManagerApprovalStatus == "Rejected")
+                });
+            }
+
+            // Thống kê theo trạng thái assignment
+            var assignmentsByStatus = new
+            {
+                New = newAssignments,
+                InProgress = inProgressAssignments,
+                Completed = completedAssignments
+            };
+
+            // Thống kê approval workflow
+            var approvalWorkflow = new
+            {
+                total = totalSheets,
+                managerL1 = new
+                {
+                    pending = pendingManagerL1,
+                    approved = approvedManagerL1,
+                    rejected = rejectedManagerL1
+                },
+                manager = new
+                {
+                    pending = pendingManager,
+                    approved = approvedManager,
+                    rejected = rejectedManager
+                },
+                fullyApproved = fullyApproved
+            };
+
+            // Thống kê theo người dùng (top users)
+            var topUsersByWorkItems = allWorkItems
+                .Where(wi => !string.IsNullOrEmpty(wi.PersonName))
+                .GroupBy(wi => wi.PersonName)
+                .Select(g => new 
+                { 
+                    PersonName = g.Key, 
+                    Total = g.Count(),
+                    Completed = g.Count(wi => wi.ActualFinish.HasValue),
+                    Pending = g.Count(wi => !wi.ActualFinish.HasValue && (wi.PersonConfirmation != true))
+                })
+                .OrderByDescending(x => x.Total)
+                .Take(10)
+                .ToList();
+
+            return Ok(new
+            {
+                user = new
+                {
+                    userId = user.UserId,
+                    userName = user.UserName,
+                    fullName = user.FullName,
+                    email = user.Email
+                },
+                overview = new
+                {
+                    totalTechnicalSheets = totalSheets,
+                    totalWorkItems = totalWorkItems,
+                    totalAssignments = totalAssignments
+                },
+                workItems = new
+                {
+                    total = totalWorkItems,
+                    completed = completedWorkItems,
+                    pending = pendingWorkItems,
+                    confirmed = confirmedWorkItems,
+                    overdue = overdueWorkItems,
+                    completionRate = workItemsCompletionRate
+                },
+                assignments = assignmentsByStatus,
+                approvalWorkflow = approvalWorkflow,
+                byType = workItemsByType,
+                monthly = monthlyStats,
+                approvalMonthly = approvalMonthlyStats,
+                topUsers = topUsersByWorkItems
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in GetManagerStats: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error retrieving manager dashboard stats", message = ex.Message });
+        }
+    }
 }
 

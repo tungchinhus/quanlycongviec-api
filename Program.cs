@@ -64,13 +64,7 @@ builder.Services.AddCors(options =>
                 "http://localhost:4200"           // Development Angular default port
             )
             .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "CONNECT")  // Explicit methods (CONNECT for SignalR)
-            .WithHeaders(
-                "Content-Type",
-                "Authorization",
-                "X-Requested-With",
-                "Accept",
-                "Origin"
-            )  // Explicit headers
+            .AllowAnyHeader()  // Allow all headers (required for SignalR which uses various headers like x-signalr-user-agent)
             .AllowCredentials()  // Cho phép gửi cookies/credentials
             .WithExposedHeaders("Authorization")  // Expose Authorization header cho frontend
             .SetPreflightMaxAge(TimeSpan.FromHours(24));  // Cache preflight requests trong 24 giờ
@@ -106,9 +100,23 @@ builder.Services.AddAuthentication(options =>
         NameClaimType = System.Security.Claims.ClaimTypes.Name
     };
     
-    // Add event handlers for debugging
+    // Configure SignalR to read token from query string (access_token parameter)
     options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
     {
+        OnMessageReceived = context =>
+        {
+            // SignalR sends token via query string as "access_token"
+            var accessToken = context.Request.Query["access_token"].ToString();
+            var path = context.HttpContext.Request.Path;
+            
+            // Only apply to SignalR hub endpoints
+            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/notificationHub"))
+            {
+                context.Token = accessToken;
+            }
+            
+            return Task.CompletedTask;
+        },
         OnAuthenticationFailed = context =>
         {
             Console.WriteLine($"Authentication failed: {context.Exception?.Message}");

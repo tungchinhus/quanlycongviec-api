@@ -334,6 +334,21 @@ public class PagePermissionsController : ControllerBase
     {
         try
         {
+            // Verify user exists
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null)
+            {
+                return NotFound(new { error = "User not found" });
+            }
+
+            // Verify page permission exists
+            var pagePermission = await _context.PagePermissions.FindAsync(pagePermissionId);
+            if (pagePermission == null)
+            {
+                return NotFound(new { error = "Page permission not found" });
+            }
+
+            // Try to find existing user page permission
             var userPagePermission = await _context.UserPagePermissions
                 .Include(upp => upp.PagePermission)
                 .Include(upp => upp.User)
@@ -341,16 +356,39 @@ public class PagePermissionsController : ControllerBase
 
             if (userPagePermission == null)
             {
-                return NotFound(new { error = "User page permission not found" });
+                // Create new permission if it doesn't exist
+                userPagePermission = new UserPagePermission
+                {
+                    UserId = userId,
+                    PagePermissionId = pagePermissionId,
+                    CanView = dto.CanView,
+                    CanCreate = dto.CanCreate,
+                    CanEdit = dto.CanEdit,
+                    CanDelete = dto.CanDelete,
+                    CreatedAt = DateTime.UtcNow,
+                    User = user,
+                    PagePermission = pagePermission
+                };
+
+                _context.UserPagePermissions.Add(userPagePermission);
+                await _context.SaveChangesAsync();
+            }
+            else
+            {
+                // Update existing permission
+                userPagePermission.CanView = dto.CanView;
+                userPagePermission.CanCreate = dto.CanCreate;
+                userPagePermission.CanEdit = dto.CanEdit;
+                userPagePermission.CanDelete = dto.CanDelete;
+                userPagePermission.UpdatedAt = DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
             }
 
-            userPagePermission.CanView = dto.CanView;
-            userPagePermission.CanCreate = dto.CanCreate;
-            userPagePermission.CanEdit = dto.CanEdit;
-            userPagePermission.CanDelete = dto.CanDelete;
-            userPagePermission.UpdatedAt = DateTime.UtcNow;
-
-            await _context.SaveChangesAsync();
+            if (userPagePermission == null)
+            {
+                return StatusCode(500, new { error = "Error saving user page permission" });
+            }
 
             var result = new UserPagePermissionDto
             {

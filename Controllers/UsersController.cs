@@ -361,13 +361,13 @@ public class UsersController : ControllerBase
         // Kiểm tra quyền: Admin/Manager có thể update bất kỳ user nào, user chỉ có thể update chính mình
         if (!isAdmin && !isManager && currentUserId != id)
         {
-            return Forbid("You can only update your own profile");
+            return StatusCode(403, new { error = "Forbidden", message = "You can only update your own profile" });
         }
 
         // Chỉ Admin/Manager mới có thể update roles và IsActive
         if ((dto.RoleIds != null || dto.IsActive.HasValue) && !isAdmin && !isManager)
         {
-            return Forbid("Only Admin or Manager can update roles and active status");
+            return StatusCode(403, new { error = "Forbidden", message = "Only Admin or Manager can update roles and active status" });
         }
 
         if (!string.IsNullOrEmpty(dto.UserName) && dto.UserName != user.UserName)

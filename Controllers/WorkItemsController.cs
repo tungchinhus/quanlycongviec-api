@@ -418,17 +418,21 @@ public class WorkItemsController : ControllerBase
 
                     if (dto.StartDate.HasValue)
                     {
-                        workItem.StartDate = dto.StartDate.Value;
+                        // DateOnlyJsonConverter already ensures the date is local, just extract date part
+                        workItem.StartDate = new DateTime(dto.StartDate.Value.Year, dto.StartDate.Value.Month, dto.StartDate.Value.Day, 0, 0, 0, DateTimeKind.Unspecified);
                     }
 
                     if (dto.ExpectedFinish.HasValue)
                     {
-                        workItem.ExpectedFinish = dto.ExpectedFinish.Value;
+                        // DateOnlyJsonConverter already ensures the date is local, just extract date part
+                        workItem.ExpectedFinish = new DateTime(dto.ExpectedFinish.Value.Year, dto.ExpectedFinish.Value.Month, dto.ExpectedFinish.Value.Day, 0, 0, 0, DateTimeKind.Unspecified);
                     }
 
                     if (dto.ActualFinish.HasValue)
                     {
-                        workItem.ActualFinish = dto.ActualFinish.Value;
+                        // DateOnlyJsonConverter already ensures the date is local, just extract date part
+                        var dateOnly = new DateTime(dto.ActualFinish.Value.Year, dto.ActualFinish.Value.Month, dto.ActualFinish.Value.Day, 0, 0, 0, DateTimeKind.Unspecified);
+                        workItem.ActualFinish = dateOnly;
                     }
 
                     if (dto.PersonConfirmation.HasValue)

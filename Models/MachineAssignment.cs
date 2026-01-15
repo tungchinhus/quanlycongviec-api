@@ -5,6 +5,7 @@ public class MachineAssignment
     public int AssignmentID { get; set; }
     public string TBKT_ID { get; set; } = string.Empty;
     public string MachineName { get; set; } = string.Empty;
+    public string? RequestDocument { get; set; } // ĐĐH/Giấy đề nghị
     public string? StandardRequirement { get; set; }
     public string? AdditionalRequest { get; set; }
     public DateTime? DeliveryDate { get; set; }

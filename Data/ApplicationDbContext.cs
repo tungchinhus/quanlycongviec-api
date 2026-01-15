@@ -221,6 +221,7 @@ public class ApplicationDbContext : DbContext
                 .HasColumnType("int");
             entity.Property(e => e.TBKT_ID).IsRequired().HasMaxLength(50);
             entity.Property(e => e.MachineName).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.RequestDocument).HasMaxLength(255); // ĐĐH/Giấy đề nghị
             entity.Property(e => e.StandardRequirement).HasMaxLength(1000);
             entity.Property(e => e.AdditionalRequest).HasMaxLength(1000);
             entity.Property(e => e.Designer).HasMaxLength(100);

@@ -13,6 +13,9 @@ public class CreateMachineAssignmentDto
     [StringLength(255)]
     public string MachineName { get; set; } = string.Empty;
 
+    [StringLength(255)]
+    public string? RequestDocument { get; set; } // ĐĐH/Giấy đề nghị
+
     [StringLength(1000)]
     public string? StandardRequirement { get; set; }
 
@@ -85,6 +88,9 @@ public class UpdateMachineAssignmentDto
     [StringLength(255)]
     public string? MachineName { get; set; }
 
+    [StringLength(255)]
+    public string? RequestDocument { get; set; } // ĐĐH/Giấy đề nghị
+
     [StringLength(1000)]
     public string? StandardRequirement { get; set; }
 
@@ -113,6 +119,10 @@ public class MachineAssignmentDto
     [JsonPropertyName("tbkt_ID")]
     public string TBKT_ID { get; set; } = string.Empty;
     public string MachineName { get; set; } = string.Empty;
+    
+    [JsonPropertyName("requestDocument")]
+    public string? RequestDocument { get; set; } // ĐĐH/Giấy đề nghị
+    
     public string? StandardRequirement { get; set; }
     public string? AdditionalRequest { get; set; }
     public DateTime? DeliveryDate { get; set; }
@@ -252,9 +262,15 @@ public class CreateWorkItemDto
     [StringLength(100)]
     public string? PersonName { get; set; }
 
+    [System.Text.Json.Serialization.JsonConverter(typeof(DateOnlyJsonConverter))]
     public DateTime? StartDate { get; set; }
+    
+    [System.Text.Json.Serialization.JsonConverter(typeof(DateOnlyJsonConverter))]
     public DateTime? ExpectedFinish { get; set; }
+    
+    [System.Text.Json.Serialization.JsonConverter(typeof(DateOnlyJsonConverter))]
     public DateTime? ActualFinish { get; set; }
+    
     public bool? PersonConfirmation { get; set; }
 
     [StringLength(500)]
@@ -269,9 +285,15 @@ public class UpdateWorkItemDto
     [StringLength(100)]
     public string? PersonName { get; set; }
 
+    [System.Text.Json.Serialization.JsonConverter(typeof(DateOnlyJsonConverter))]
     public DateTime? StartDate { get; set; }
+    
+    [System.Text.Json.Serialization.JsonConverter(typeof(DateOnlyJsonConverter))]
     public DateTime? ExpectedFinish { get; set; }
+    
+    [System.Text.Json.Serialization.JsonConverter(typeof(DateOnlyJsonConverter))]
     public DateTime? ActualFinish { get; set; }
+    
     public bool? PersonConfirmation { get; set; }
 
     [StringLength(500)]

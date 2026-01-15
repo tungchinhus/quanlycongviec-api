@@ -51,6 +51,7 @@ public class AssignmentsController : ControllerBase
                 AssignmentID = a.AssignmentID,
                 TBKT_ID = a.TBKT_ID,
                 MachineName = a.MachineName,
+                RequestDocument = a.RequestDocument,
                 StandardRequirement = a.StandardRequirement,
                 AdditionalRequest = a.AdditionalRequest,
                 DeliveryDate = a.DeliveryDate,
@@ -139,6 +140,7 @@ public class AssignmentsController : ControllerBase
                 AssignmentID = assignment.AssignmentID,
                 TBKT_ID = assignment.TBKT_ID,
                 MachineName = assignment.MachineName,
+                RequestDocument = assignment.RequestDocument,
                 StandardRequirement = assignment.StandardRequirement,
                 AdditionalRequest = assignment.AdditionalRequest,
                 DeliveryDate = assignment.DeliveryDate,
@@ -382,6 +384,7 @@ public class AssignmentsController : ControllerBase
                     {
                         TBKT_ID = dto.TBKT_ID,
                         MachineName = dto.MachineName,
+                        RequestDocument = dto.RequestDocument,
                         StandardRequirement = dto.StandardRequirement,
                         AdditionalRequest = dto.AdditionalRequest,
                         DeliveryDate = dto.DeliveryDate,
@@ -427,6 +430,7 @@ public class AssignmentsController : ControllerBase
                 AssignmentID = assignment.AssignmentID,
                 TBKT_ID = assignment.TBKT_ID,
                 MachineName = assignment.MachineName,
+                RequestDocument = assignment.RequestDocument,
                 StandardRequirement = assignment.StandardRequirement,
                 AdditionalRequest = assignment.AdditionalRequest,
                 DeliveryDate = assignment.DeliveryDate,
@@ -514,6 +518,8 @@ public class AssignmentsController : ControllerBase
                 assignment.TBKT_ID = dto.TBKT_ID;
             if (!string.IsNullOrEmpty(dto.MachineName))
                 assignment.MachineName = dto.MachineName;
+            if (dto.RequestDocument != null)
+                assignment.RequestDocument = dto.RequestDocument;
             if (dto.StandardRequirement != null)
                 assignment.StandardRequirement = dto.StandardRequirement;
             if (dto.AdditionalRequest != null)
@@ -979,6 +985,7 @@ public class AssignmentsController : ControllerBase
                         AssignmentID = assignment.AssignmentID,
                         TBKT_ID = assignment.TBKT_ID,
                         MachineName = assignment.MachineName,
+                        RequestDocument = assignment.RequestDocument,
                         StandardRequirement = assignment.StandardRequirement,
                         AdditionalRequest = assignment.AdditionalRequest,
                         DeliveryDate = assignment.DeliveryDate,
@@ -1151,20 +1158,53 @@ public class AssignmentsController : ControllerBase
                         var fullName = user.FullName ?? "";
                         var userName = user.UserName ?? "";
                         
-                        // Kiểm tra xem user có phải là người đã xác nhận review workitem (Core Review hoặc Casing Review) không
-                        var reviewWorkItems = assignment.WorkItems?.Where(wi => 
+                        // Kiểm tra xem user có phải là người được gán review workitem (Core Review hoặc Casing Review) không
+                        // VÀ design workitem tương ứng đã được xác nhận
+                        var userReviewWorkItems = assignment.WorkItems?.Where(wi => 
                             (wi.WorkType == "Core Review" || wi.WorkType == "Casing Review") &&
-                            wi.PersonConfirmation == true &&
                             (wi.PersonName == userIdString || 
                              wi.PersonName == fullName ||
                              wi.PersonName == userName)
                         ).ToList();
 
-                        if (reviewWorkItems != null && reviewWorkItems.Any())
+                        if (userReviewWorkItems != null && userReviewWorkItems.Any())
                         {
-                            hasUnlockPermission = true;
-                            _logger?.LogInformation("User {UserId} ({FullName}) has unlock permission as review workitem confirmer for assignment {AssignmentID}", 
-                                user.UserId, user.FullName, id);
+                            // Kiểm tra xem design workitem tương ứng đã được xác nhận chưa
+                            foreach (var reviewWorkItem in userReviewWorkItems)
+                            {
+                                string? designWorkType = null;
+                                if (reviewWorkItem.WorkType == "Core Review")
+                                {
+                                    designWorkType = "Core Design";
+                                }
+                                else if (reviewWorkItem.WorkType == "Casing Review")
+                                {
+                                    designWorkType = "Casing Design";
+                                }
+
+                                if (!string.IsNullOrEmpty(designWorkType))
+                                {
+                                    // Tìm design workitem tương ứng
+                                    var designWorkItem = assignment.WorkItems?.FirstOrDefault(wi =>
+                                        wi.WorkType == designWorkType);
+
+                                    if (designWorkItem != null)
+                                    {
+                                        // Kiểm tra design workitem đã được xác nhận chưa
+                                        var isDesignConfirmed = designWorkItem.PersonConfirmation == true ||
+                                                                 (designWorkItem.PersonConfirmation.HasValue && 
+                                                                  designWorkItem.PersonConfirmation.Value);
+
+                                        if (isDesignConfirmed)
+                                        {
+                                            hasUnlockPermission = true;
+                                            _logger?.LogInformation("User {UserId} ({FullName}) has unlock permission as review workitem user for assignment {AssignmentID} (design workitem {DesignWorkItemID} is confirmed)", 
+                                                user.UserId, user.FullName, id, designWorkItem.WorkItemID);
+                                            break; // Đã tìm thấy permission, không cần kiểm tra tiếp
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1172,7 +1212,7 @@ public class AssignmentsController : ControllerBase
 
             if (!hasUnlockPermission)
             {
-                return Forbid("Bạn không có quyền mở khóa assignment này. Chỉ Manager/Admin hoặc user kiểm soát đã xác nhận mới có quyền mở khóa.");
+                return StatusCode(403, new { error = "Forbidden", message = "Bạn không có quyền mở khóa assignment này. Chỉ Manager/Admin hoặc user kiểm soát đã xác nhận mới có quyền mở khóa." });
             }
 
             // Reset personConfirmation của workitem thiết kế (Core Design hoặc Casing Design) về false
@@ -1180,15 +1220,16 @@ public class AssignmentsController : ControllerBase
             // CHỈ reset workitems của user thiết kế tương ứng, không reset tất cả users
             // Đồng thời reset personConfirmation của workitem kiểm soát (Core Review hoặc Casing Review) về false
             // CHỈ reset review workitems tương ứng với design workitems đã được reset
-            if (assignment.WorkItems != null)
+            if (assignment.WorkItems != null && assignment.WorkItems.Any())
             {
                 // Lấy danh sách PersonName của các design workitems (user thiết kế) đã được xác nhận
                 // PersonName có thể là UserId (string), FullName, hoặc UserName
                 var designWorkItemPersonNames = assignment.WorkItems
-                    .Where(wi => (wi.WorkType == "Core Design" || wi.WorkType == "Casing Design")
+                    .Where(wi => wi != null 
+                                 && (wi.WorkType == "Core Design" || wi.WorkType == "Casing Design")
                                  && wi.PersonConfirmation == true
                                  && !string.IsNullOrEmpty(wi.PersonName))
-                    .Select(wi => wi.PersonName)
+                    .Select(wi => wi.PersonName!)
                     .Distinct()
                     .ToList();
                 
@@ -1199,31 +1240,41 @@ public class AssignmentsController : ControllerBase
                     
                     // Reset workitem thiết kế - CHỈ reset workitems của user thiết kế tương ứng
                     var designWorkItems = assignment.WorkItems
-                        .Where(wi => (wi.WorkType == "Core Design" || wi.WorkType == "Casing Design")
+                        .Where(wi => wi != null
+                                     && (wi.WorkType == "Core Design" || wi.WorkType == "Casing Design")
                                      && wi.PersonConfirmation == true
+                                     && !string.IsNullOrEmpty(wi.PersonName)
                                      && designWorkItemPersonNames.Contains(wi.PersonName))
                         .ToList();
                     
                     foreach (var designWorkItem in designWorkItems)
                     {
-                        designWorkItem.PersonConfirmation = false;
-                        _logger?.LogInformation("Reset personConfirmation to false for design workitem {WorkItemID} (WorkType: {WorkType}, PersonName: {PersonName}) when unlocking assignment {AssignmentID}", 
-                            designWorkItem.WorkItemID, designWorkItem.WorkType, designWorkItem.PersonName, id);
+                        if (designWorkItem != null)
+                        {
+                            designWorkItem.PersonConfirmation = false;
+                            _logger?.LogInformation("Reset personConfirmation to false for design workitem {WorkItemID} (WorkType: {WorkType}, PersonName: {PersonName}) when unlocking assignment {AssignmentID}", 
+                                designWorkItem.WorkItemID, designWorkItem.WorkType, designWorkItem.PersonName, id);
+                        }
                     }
                     
                     // Reset workitem kiểm soát - CHỈ reset review workitems tương ứng với design workitems đã reset
                     // Tìm review workitems có cùng PersonName với design workitems đã được reset
                     var reviewWorkItems = assignment.WorkItems
-                        .Where(wi => (wi.WorkType == "Core Review" || wi.WorkType == "Casing Review")
+                        .Where(wi => wi != null
+                                     && (wi.WorkType == "Core Review" || wi.WorkType == "Casing Review")
                                      && wi.PersonConfirmation == true
+                                     && !string.IsNullOrEmpty(wi.PersonName)
                                      && designWorkItemPersonNames.Contains(wi.PersonName))
                         .ToList();
                     
                     foreach (var reviewWorkItem in reviewWorkItems)
                     {
-                        reviewWorkItem.PersonConfirmation = false;
-                        _logger?.LogInformation("Reset personConfirmation to false for review workitem {WorkItemID} (WorkType: {WorkType}, PersonName: {PersonName}) when unlocking assignment {AssignmentID} to update status and show confirm button", 
-                            reviewWorkItem.WorkItemID, reviewWorkItem.WorkType, reviewWorkItem.PersonName, id);
+                        if (reviewWorkItem != null)
+                        {
+                            reviewWorkItem.PersonConfirmation = false;
+                            _logger?.LogInformation("Reset personConfirmation to false for review workitem {WorkItemID} (WorkType: {WorkType}, PersonName: {PersonName}) when unlocking assignment {AssignmentID} to update status and show confirm button", 
+                                reviewWorkItem.WorkItemID, reviewWorkItem.WorkType, reviewWorkItem.PersonName, id);
+                        }
                     }
                 }
                 else
@@ -1231,9 +1282,35 @@ public class AssignmentsController : ControllerBase
                     _logger?.LogWarning("Unlocking assignment {AssignmentID}: No confirmed design workitems found with PersonName, skipping reset", id);
                 }
             }
+            else
+            {
+                _logger?.LogInformation("Unlocking assignment {AssignmentID}: No work items found, skipping reset", id);
+            }
 
             assignment.IsLocked = false;
-            await _context.SaveChangesAsync();
+            
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException dbEx)
+            {
+                _logger?.LogError(dbEx, "Database error when unlocking assignment {AssignmentID}: {Message}. InnerException: {InnerException}", 
+                    id, dbEx.Message, dbEx.InnerException?.Message);
+                return StatusCode(500, new { 
+                    error = "Database error when unlocking assignment", 
+                    message = dbEx.Message,
+                    innerException = dbEx.InnerException?.Message
+                });
+            }
+            catch (Exception saveEx)
+            {
+                _logger?.LogError(saveEx, "Error saving changes when unlocking assignment {AssignmentID}: {Message}", id, saveEx.Message);
+                return StatusCode(500, new { 
+                    error = "Error saving changes when unlocking assignment", 
+                    message = saveEx.Message
+                });
+            }
 
             _logger?.LogInformation("Unlocked assignment {AssignmentID} by user {Username}", id, User.Identity?.Name);
 
@@ -1245,8 +1322,13 @@ public class AssignmentsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error unlocking assignment {AssignmentID}: {Message}", id, ex.Message);
-            return StatusCode(500, new { error = "Error unlocking assignment", message = ex.Message });
+            _logger?.LogError(ex, "Error unlocking assignment {AssignmentID}: {Message}. StackTrace: {StackTrace}", 
+                id, ex.Message, ex.StackTrace);
+            return StatusCode(500, new { 
+                error = "Error unlocking assignment", 
+                message = ex.Message,
+                details = ex.InnerException?.Message
+            });
         }
     }
 

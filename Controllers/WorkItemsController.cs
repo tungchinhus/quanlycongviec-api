@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
+using System.Security.Claims;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
@@ -77,6 +78,216 @@ public class WorkItemsController : ControllerBase
         {
             _logger?.LogError(ex, "Error in GetWorkItems: {Message}", ex.Message);
             return StatusCode(500, new { error = "Error getting work items", message = ex.Message });
+        }
+    }
+
+    // GET: api/work-items/by-date-range
+    [HttpGet("by-date-range")]
+    public async Task<ActionResult<IEnumerable<WorkItemDto>>> GetWorkItemsByDateRange(
+        [FromQuery] string? startDate = null,
+        [FromQuery] string? endDate = null,
+        [FromQuery] string[]? workTypes = null,
+        [FromQuery] bool allUsers = false,
+        [FromQuery] bool skipDateFilter = false)
+    {
+        try
+        {
+            IQueryable<WorkItem> query = _context.WorkItems;
+
+            // Nếu allUsers = false, filter theo user hiện tại
+            if (!allUsers)
+            {
+                // Lấy FirebaseUID từ JWT token để filter theo user hiện tại
+                var firebaseUID = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
+                                 ?? User.FindFirst("sub")?.Value;
+                
+                if (string.IsNullOrEmpty(firebaseUID))
+                {
+                    _logger?.LogWarning("GetWorkItemsByDateRange - No FirebaseUID found in token");
+                    return Unauthorized(new { error = "Invalid user token" });
+                }
+
+                // Lấy thông tin user từ FirebaseUID
+                var user = await _context.Users
+                    .FirstOrDefaultAsync(u => u.FirebaseUID == firebaseUID);
+                
+                if (user == null)
+                {
+                    // Nếu không tìm thấy theo FirebaseUID, thử tìm theo email
+                    var emailClaim = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value 
+                                    ?? User.FindFirst("email")?.Value;
+                    
+                    if (!string.IsNullOrEmpty(emailClaim))
+                    {
+                        user = await _context.Users
+                            .FirstOrDefaultAsync(u => u.Email == emailClaim);
+                    }
+                    
+                    if (user == null)
+                    {
+                        _logger?.LogWarning("GetWorkItemsByDateRange - User not found. FirebaseUID: {FirebaseUID}", firebaseUID);
+                        return NotFound(new { error = "User not found" });
+                    }
+                }
+
+                // Lấy username để filter theo PersonName trong WorkItems
+                // PersonName có thể là: UserId (string), FullName, hoặc UserName
+                var userName = user.UserName;
+                var fullName = user.FullName;
+                var userIdString = user.UserId.ToString();
+
+                query = query.Where(wi => wi.PersonName == userName || 
+                                       wi.PersonName == fullName || 
+                                       wi.PersonName == userIdString);
+            }
+
+            // Filter by date range (check StartDate, ExpectedFinish, ActualFinish, or Assignment DeliveryDate)
+            // Hiển thị tất cả công việc có ít nhất một trong các ngày nằm trong khoảng 7 ngày qua
+            // HOẶC có Assignment với DeliveryDate trong khoảng
+            // Mục đích: xem tổng quan công việc, không phân biệt trạng thái
+            // Nếu skipDateFilter = true, bỏ qua filter ngày để hiển thị tất cả
+            if (!skipDateFilter && !string.IsNullOrEmpty(startDate) && DateTime.TryParse(startDate, out var start) &&
+                !string.IsNullOrEmpty(endDate) && DateTime.TryParse(endDate, out var end))
+            {
+                var endDateInclusive = end.Date.AddDays(1);
+                query = query.Where(wi =>
+                    // StartDate nằm trong khoảng
+                    (wi.StartDate.HasValue && wi.StartDate.Value >= start.Date && wi.StartDate.Value < endDateInclusive) ||
+                    // ExpectedFinish nằm trong khoảng
+                    (wi.ExpectedFinish.HasValue && wi.ExpectedFinish.Value >= start.Date && wi.ExpectedFinish.Value < endDateInclusive) ||
+                    // ActualFinish nằm trong khoảng
+                    (wi.ActualFinish.HasValue && wi.ActualFinish.Value >= start.Date && wi.ActualFinish.Value < endDateInclusive) ||
+                    // Assignment DeliveryDate nằm trong khoảng
+                    (wi.MachineAssignment != null && 
+                     wi.MachineAssignment.DeliveryDate.HasValue && 
+                     wi.MachineAssignment.DeliveryDate.Value >= start.Date && 
+                     wi.MachineAssignment.DeliveryDate.Value < endDateInclusive)
+                );
+            }
+            else if (!skipDateFilter)
+            {
+                // Nếu không có date range, vẫn filter theo từng ngày nếu có
+                if (!string.IsNullOrEmpty(startDate) && DateTime.TryParse(startDate, out var startOnly))
+                {
+                    query = query.Where(wi =>
+                        (wi.StartDate.HasValue && wi.StartDate.Value >= startOnly.Date) ||
+                        (wi.ExpectedFinish.HasValue && wi.ExpectedFinish.Value >= startOnly.Date) ||
+                        (wi.ActualFinish.HasValue && wi.ActualFinish.Value >= startOnly.Date) ||
+                        (wi.MachineAssignment != null && 
+                         wi.MachineAssignment.DeliveryDate.HasValue && 
+                         wi.MachineAssignment.DeliveryDate.Value >= startOnly.Date)
+                    );
+                }
+
+                if (!string.IsNullOrEmpty(endDate) && DateTime.TryParse(endDate, out var endOnly))
+                {
+                    var endDateInclusive = endOnly.Date.AddDays(1);
+                    query = query.Where(wi =>
+                        (wi.StartDate.HasValue && wi.StartDate.Value < endDateInclusive) ||
+                        (wi.ExpectedFinish.HasValue && wi.ExpectedFinish.Value < endDateInclusive) ||
+                        (wi.ActualFinish.HasValue && wi.ActualFinish.Value < endDateInclusive) ||
+                        (wi.MachineAssignment != null && 
+                         wi.MachineAssignment.DeliveryDate.HasValue && 
+                         wi.MachineAssignment.DeliveryDate.Value < endDateInclusive)
+                    );
+                }
+            }
+
+            // Filter by work types
+            if (workTypes != null && workTypes.Length > 0)
+            {
+                query = query.Where(wi => wi.WorkType != null && workTypes.Contains(wi.WorkType));
+            }
+
+            var workItems = await query
+                .Include(wi => wi.MachineAssignment!)
+                    .ThenInclude(ma => ma.TechnicalSheet)
+                .OrderByDescending(wi => wi.StartDate ?? wi.ExpectedFinish ?? wi.ActualFinish)
+                .ToListAsync();
+
+            // Lấy danh sách PersonName để query Users
+            var personNames = workItems
+                .Where(wi => !string.IsNullOrEmpty(wi.PersonName))
+                .Select(wi => wi.PersonName!)
+                .Distinct()
+                .ToList();
+
+            // Query Users để lấy FullName
+            var users = await _context.Users
+                .Where(u => personNames.Contains(u.UserName) || 
+                           personNames.Contains(u.FullName ?? "") ||
+                           personNames.Contains(u.UserId.ToString()))
+                .ToListAsync();
+
+            // Tạo dictionary để map PersonName -> FullName
+            var personNameToFullName = new Dictionary<string, string>();
+            foreach (var u in users)
+            {
+                if (!string.IsNullOrEmpty(u.UserName))
+                    personNameToFullName[u.UserName] = u.FullName ?? u.UserName;
+                if (!string.IsNullOrEmpty(u.FullName))
+                    personNameToFullName[u.FullName] = u.FullName;
+                personNameToFullName[u.UserId.ToString()] = u.FullName ?? u.UserName ?? "";
+            }
+
+            // Lấy danh sách TBKT_ID để query TechnicalSheet trực tiếp (fallback nếu navigation property không hoạt động)
+            var tbktIds = workItems
+                .Where(wi => wi.MachineAssignment != null && !string.IsNullOrEmpty(wi.MachineAssignment.TBKT_ID))
+                .Select(wi => wi.MachineAssignment!.TBKT_ID)
+                .Distinct()
+                .ToList();
+
+            // Query TechnicalSheet trực tiếp
+            var technicalSheets = await _context.TechnicalSheets
+                .Where(ts => tbktIds.Contains(ts.TBKT_ID))
+                .ToListAsync();
+
+            // Tạo dictionary để map TBKT_ID -> TechnicalSheet
+            var tbktIdToTechnicalSheet = technicalSheets.ToDictionary(ts => ts.TBKT_ID);
+
+            var workItemDtos = workItems.Select(wi => 
+            {
+                // Lấy TBKT_ID trực tiếp từ MachineAssignment.TBKT_ID
+                var tbktId = !string.IsNullOrEmpty(wi.MachineAssignment?.TBKT_ID) 
+                    ? wi.MachineAssignment.TBKT_ID 
+                    : null;
+
+                // Lấy Power_kVA từ TechnicalSheet nếu có
+                var technicalSheet = wi.MachineAssignment?.TechnicalSheet;
+                if (technicalSheet == null && wi.MachineAssignment != null && !string.IsNullOrEmpty(wi.MachineAssignment.TBKT_ID))
+                {
+                    tbktIdToTechnicalSheet.TryGetValue(wi.MachineAssignment.TBKT_ID, out technicalSheet);
+                }
+                var powerKVA = technicalSheet?.Power_kVA;
+
+                return new WorkItemDto
+                {
+                    WorkItemID = wi.WorkItemID,
+                    AssignmentID = wi.AssignmentID,
+                    WorkType = wi.WorkType,
+                    PersonName = wi.PersonName,
+                    FullName = !string.IsNullOrEmpty(wi.PersonName) && personNameToFullName.TryGetValue(wi.PersonName, out var fullName) 
+                        ? fullName 
+                        : wi.PersonName,
+                    StartDate = wi.StartDate,
+                    ExpectedFinish = wi.ExpectedFinish,
+                    ActualFinish = wi.ActualFinish,
+                    PersonConfirmation = wi.PersonConfirmation,
+                    Notes = wi.Notes,
+                    File_ID = wi.File_ID,
+                    MachineName = wi.MachineAssignment?.MachineName,
+                    TBKT_ID = tbktId,
+                    Power_kVA = technicalSheet?.Power_kVA,
+                    DeliveryDate = wi.MachineAssignment?.DeliveryDate // Ngày hoàn thành của TBKT tổng
+                };
+            });
+
+            return Ok(workItemDtos);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in GetWorkItemsByDateRange: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error getting work items by date range", message = ex.Message });
         }
     }
 

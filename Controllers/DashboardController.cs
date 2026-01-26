@@ -190,12 +190,14 @@ public class DashboardController : ControllerBase
                 .Distinct()
                 .ToList();
 
-            // Lấy thông tin assignments
+            // Lấy thông tin assignments kèm TechnicalSheet và TẤT CẢ work items để kiểm tra approval
             var recentAssignments = await _context.MachineAssignments
+                .Include(a => a.TechnicalSheet)
+                .Include(a => a.WorkItems) // Load tất cả work items của assignment
                 .Where(a => recentAssignmentIds.Contains(a.AssignmentID))
                 .ToListAsync();
 
-            // Tạo dictionary để map AssignmentID -> Latest StartDate
+            // Tạo dictionary để map AssignmentID -> Latest StartDate (chỉ từ recent work items để sắp xếp)
             var assignmentStartDates = allRecentWorkItems
                 .GroupBy(wi => wi.AssignmentID)
                 .ToDictionary(
@@ -206,11 +208,83 @@ public class DashboardController : ControllerBase
                           .Max()
                 );
 
-            // Sắp xếp assignments theo StartDate mới nhất và lấy tên máy
+            // Sắp xếp assignments theo StartDate mới nhất và lấy thông tin máy kèm trạng thái
             var recentMachines = recentAssignments
                 .OrderByDescending(a => assignmentStartDates.GetValueOrDefault(a.AssignmentID, DateTime.MinValue))
                 .Take(10) // Lấy tối đa 10 máy gần đây nhất
-                .Select(a => a.MachineName)
+                .Select(a => {
+                    // Lấy TẤT CẢ work items của assignment này (không chỉ trong 7 ngày qua)
+                    var allWorkItemsForAssignment = a.WorkItems?.ToList() ?? new List<WorkItem>();
+                    var latestStartDate = assignmentStartDates.GetValueOrDefault(a.AssignmentID, DateTime.MinValue);
+                    
+                    // Xác định trạng thái:
+                    // - "completed": Tất cả work items đã có ActualFinish VÀ đã xác nhận (PersonConfirmation) 
+                    //                VÀ TechnicalSheet đã được ký duyệt hoàn thành (ManagerL1 và Manager đã approve)
+                    // - "in-progress": Có work items chưa hoàn thành nhưng đã có StartDate
+                    // - "new": Chưa có work items hoặc chưa có StartDate
+                    string status = "new";
+                    if (allWorkItemsForAssignment.Any())
+                    {
+                        // Kiểm tra tất cả work items của assignment (không chỉ trong 7 ngày qua)
+                        // Lọc ra các work items có WorkType (không null/empty) để kiểm tra
+                        var validWorkItems = allWorkItemsForAssignment
+                            .Where(wi => !string.IsNullOrEmpty(wi.WorkType))
+                            .ToList();
+                        
+                        // Nếu không có work items hợp lệ, coi như chưa bắt đầu
+                        if (!validWorkItems.Any())
+                        {
+                            status = "new";
+                        }
+                        else
+                        {
+                            // Kiểm tra completion: tất cả work items phải có ActualFinish
+                            var allCompleted = validWorkItems.All(wi => wi.ActualFinish.HasValue);
+                            
+                            // Kiểm tra confirmation: tất cả work items phải có PersonConfirmation == true
+                            var allConfirmed = validWorkItems.All(wi => wi.PersonConfirmation == true);
+                            
+                            // Kiểm tra xem có work items nào đã bắt đầu chưa
+                            var hasStarted = validWorkItems.Any(wi => wi.StartDate.HasValue);
+                            
+                            // Kiểm tra TechnicalSheet approval status
+                            var technicalSheet = a.TechnicalSheet;
+                            var isFullyApproved = technicalSheet != null &&
+                                !string.IsNullOrEmpty(technicalSheet.ManagerL1ApprovalStatus) &&
+                                technicalSheet.ManagerL1ApprovalStatus == "Approved" &&
+                                !string.IsNullOrEmpty(technicalSheet.ManagerApprovalStatus) &&
+                                technicalSheet.ManagerApprovalStatus == "Approved";
+                            
+                            // Ưu tiên: Nếu TechnicalSheet đã được ký duyệt hoàn thành (ManagerL1 và Manager đã approve),
+                            // thì coi như "completed" bất kể work items như thế nào
+                            // Vì khi đã được approve hoàn toàn, assignment đã hoàn thành về mặt phê duyệt
+                            if (isFullyApproved)
+                            {
+                                status = "completed";
+                            }
+                            // Nếu chưa được approve hoàn toàn, kiểm tra work items:
+                            // Chỉ đánh dấu "completed" khi:
+                            // 1. Tất cả work items đã hoàn thành (ActualFinish)
+                            // 2. Tất cả work items đã xác nhận (PersonConfirmation)
+                            else if (allCompleted && allConfirmed)
+                            {
+                                status = "completed";
+                            }
+                            else if (hasStarted)
+                            {
+                                status = "in-progress";
+                            }
+                        }
+                    }
+                    
+                    return new
+                    {
+                        machineName = a.MachineName,
+                        tbktId = a.TBKT_ID,
+                        status = status,
+                        startDate = latestStartDate != DateTime.MinValue ? latestStartDate : (DateTime?)null
+                    };
+                })
                 .ToList();
 
             // Thống kê theo WorkType

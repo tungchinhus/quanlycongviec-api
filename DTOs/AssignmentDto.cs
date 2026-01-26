@@ -241,6 +241,7 @@ public class WorkItemDto
     public int AssignmentID { get; set; }
     public string? WorkType { get; set; }
     public string? PersonName { get; set; }
+    public string? FullName { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? ExpectedFinish { get; set; }
     public DateTime? ActualFinish { get; set; }
@@ -249,6 +250,16 @@ public class WorkItemDto
     
     [JsonPropertyName("file_ID")]
     public string? File_ID { get; set; }
+    
+    public string? MachineName { get; set; }
+    
+    [JsonPropertyName("tbkt_ID")]
+    public string? TBKT_ID { get; set; }
+    
+    public int? Power_kVA { get; set; }
+    
+    [JsonPropertyName("deliveryDate")]
+    public DateTime? DeliveryDate { get; set; } // Ngày hoàn thành của TBKT tổng (từ MachineAssignment)
 }
 
 public class CreateWorkItemDto

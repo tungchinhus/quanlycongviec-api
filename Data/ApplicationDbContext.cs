@@ -91,6 +91,9 @@ public class ApplicationDbContext : DbContext
             entity.HasKey(e => e.UserId);
             entity.Property(e => e.UserId)
                 .HasColumnType("int");
+            entity.Property(e => e.SignaturePath)
+                .HasMaxLength(500)
+                .HasColumnType("nvarchar");
             entity.HasIndex(e => e.UserName).IsUnique();
             entity.HasIndex(e => e.FirebaseUID).IsUnique();
         });

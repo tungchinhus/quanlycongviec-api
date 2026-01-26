@@ -1055,6 +1055,35 @@ public class TechnicalSheetsController : ControllerBase
                     CreatedAt = DateTime.UtcNow
                 };
                 _context.TechnicalSheetApprovals.Add(approval);
+
+                // Lưu vào bảng AssignmentApproval cho tất cả MachineAssignment có cùng TBKT_ID
+                if (dto.Action == "approve")
+                {
+                    var assignments = await _context.MachineAssignments
+                        .Where(ma => ma.TBKT_ID == tbktId)
+                        .ToListAsync();
+
+                    foreach (var assignment in assignments)
+                    {
+                        // Kiểm tra xem đã có approval cho ManagerL1 chưa để tránh duplicate
+                        var existingApproval = await _context.AssignmentApprovals
+                            .FirstOrDefaultAsync(aa => aa.AssignmentID == assignment.AssignmentID && 
+                                                       aa.ApproverRole == "ManagerL1");
+
+                        if (existingApproval == null)
+                        {
+                            var assignmentApproval = new Models.AssignmentApproval
+                            {
+                                AssignmentID = assignment.AssignmentID,
+                                ApproverRole = "ManagerL1",
+                                ApproverName = currentUser?.FullName ?? currentUserEmail ?? "Unknown",
+                                ApprovalDate = DateTime.UtcNow,
+                                Notes = dto.Notes
+                            };
+                            _context.AssignmentApprovals.Add(assignmentApproval);
+                        }
+                    }
+                }
             }
             else if (dto.ApprovalLevel == "Manager")
             {
@@ -1094,6 +1123,45 @@ public class TechnicalSheetsController : ControllerBase
                     CreatedAt = DateTime.UtcNow
                 };
                 _context.TechnicalSheetApprovals.Add(approval);
+
+                // Lưu vào bảng AssignmentApproval cho tất cả MachineAssignment có cùng TBKT_ID
+                if (dto.Action == "approve")
+                {
+                    var assignments = await _context.MachineAssignments
+                        .Where(ma => ma.TBKT_ID == tbktId)
+                        .ToListAsync();
+
+                    foreach (var assignment in assignments)
+                    {
+                        // Kiểm tra xem đã có approval cho Manager chưa để tránh duplicate
+                        var existingApproval = await _context.AssignmentApprovals
+                            .FirstOrDefaultAsync(aa => aa.AssignmentID == assignment.AssignmentID && 
+                                                       aa.ApproverRole == "Manager");
+
+                        if (existingApproval == null)
+                        {
+                            var assignmentApproval = new Models.AssignmentApproval
+                            {
+                                AssignmentID = assignment.AssignmentID,
+                                ApproverRole = "Manager",
+                                ApproverName = currentUser?.FullName ?? currentUserEmail ?? "Unknown",
+                                ApprovalDate = DateTime.UtcNow,
+                                Notes = dto.Notes
+                            };
+                            _context.AssignmentApprovals.Add(assignmentApproval);
+                        }
+
+                        // Khi Manager approve (approval cuối cùng), cập nhật status thành 3 (hoàn thành)
+                        // Vì TechnicalSheet đã được approve hoàn toàn
+                        if (assignment.Status != 3)
+                        {
+                            assignment.Status = 3; // Hoàn thành
+                            _logger?.LogInformation(
+                                "Updated Assignment {AssignmentID} status to 3 (Hoàn thành) after Manager approval for TBKT_ID {TBKT_ID}",
+                                assignment.AssignmentID, tbktId);
+                        }
+                    }
+                }
             }
             else
             {

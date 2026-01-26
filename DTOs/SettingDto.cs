@@ -29,7 +29,10 @@ public class ValidatePathResponseDto
 public class SystemSettingsDto
 {
     public string FileStoragePath { get; set; } = string.Empty;
+    public string SignatureStoragePath { get; set; } = string.Empty;
     public bool SendEmailNotifications { get; set; } = true; // Default to email notifications
+    public int DesignerWarningDays { get; set; } = 2; // Default: warning 2 days before expected finish
+    public int ReviewerWarningDays { get; set; } = 1; // Default: warning 1 day before confirmation
 }
 
 public class UpdateNotificationSettingsDto
@@ -37,3 +40,8 @@ public class UpdateNotificationSettingsDto
     public bool SendEmailNotifications { get; set; }
 }
 
+public class UpdateWarningDaysSettingsDto
+{
+    public int DesignerWarningDays { get; set; }
+    public int ReviewerWarningDays { get; set; }
+}

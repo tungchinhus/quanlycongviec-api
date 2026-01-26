@@ -282,10 +282,38 @@ public class SettingsController : ControllerBase
                 bool.TryParse(notificationSetting.Value, out sendEmailNotifications);
             }
 
+            // Get warning days settings from database
+            var designerWarningDaysSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "designer-warning-days");
+            var reviewerWarningDaysSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "reviewer-warning-days");
+            
+            var designerWarningDays = 2; // Default: 2 days
+            var reviewerWarningDays = 1; // Default: 1 day
+            if (designerWarningDaysSetting != null)
+            {
+                int.TryParse(designerWarningDaysSetting.Value, out designerWarningDays);
+            }
+            if (reviewerWarningDaysSetting != null)
+            {
+                int.TryParse(reviewerWarningDaysSetting.Value, out reviewerWarningDays);
+            }
+
+            // Get signature storage path from database
+            var signaturePathSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "signature-storage-path");
+            
+            var signatureStoragePath = signaturePathSetting != null 
+                ? signaturePathSetting.Value 
+                : Path.Combine(Directory.GetCurrentDirectory(), "signatures"); // Default fallback
+
             var settings = new SystemSettingsDto
             {
                 FileStoragePath = fileStoragePath,
-                SendEmailNotifications = sendEmailNotifications
+                SignatureStoragePath = signatureStoragePath,
+                SendEmailNotifications = sendEmailNotifications,
+                DesignerWarningDays = designerWarningDays,
+                ReviewerWarningDays = reviewerWarningDays
             };
 
             return Ok(settings);
@@ -360,6 +388,191 @@ public class SettingsController : ControllerBase
         {
             _logger?.LogError(ex, "Error in UpdateNotificationPreference: {Message}", ex.Message);
             return StatusCode(500, new { error = "Error updating notification preference", message = ex.Message });
+        }
+    }
+
+    // GET: api/settings/warning-days
+    [HttpGet("warning-days")]
+    [Authorize]
+    public async Task<IActionResult> GetWarningDays()
+    {
+        try
+        {
+            var designerWarningDaysSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "designer-warning-days");
+            var reviewerWarningDaysSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "reviewer-warning-days");
+            
+            var designerWarningDays = 2; // Default: 2 days
+            var reviewerWarningDays = 1; // Default: 1 day
+            if (designerWarningDaysSetting != null)
+            {
+                int.TryParse(designerWarningDaysSetting.Value, out designerWarningDays);
+            }
+            if (reviewerWarningDaysSetting != null)
+            {
+                int.TryParse(reviewerWarningDaysSetting.Value, out reviewerWarningDays);
+            }
+
+            return Ok(new { designerWarningDays, reviewerWarningDays });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in GetWarningDays: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error retrieving warning days", message = ex.Message });
+        }
+    }
+
+    // GET: api/settings/signature-storage-path
+    [HttpGet("signature-storage-path")]
+    [Authorize(Roles = "Administrator,Admin")]
+    public async Task<IActionResult> GetSignatureStoragePath()
+    {
+        try
+        {
+            // Check database first, then fall back to default
+            var pathSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "signature-storage-path");
+            
+            var signatureStoragePath = pathSetting != null 
+                ? pathSetting.Value 
+                : Path.Combine(Directory.GetCurrentDirectory(), "signatures");
+
+            return Ok(new { signatureStoragePath });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in GetSignatureStoragePath: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error retrieving signature storage path", message = ex.Message });
+        }
+    }
+
+    // PUT: api/settings/signature-storage-path
+    [HttpPut("signature-storage-path")]
+    [Authorize(Roles = "Administrator,Admin")]
+    public async Task<IActionResult> UpdateSignatureStoragePath([FromBody] UpdateFileStoragePathDto updateDto)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(updateDto.Path))
+            {
+                return BadRequest(new { error = "Path is required" });
+            }
+
+            var trimmedPath = updateDto.Path.Trim();
+
+            // Validate path
+            var validationResult = ValidatePathInternal(trimmedPath);
+            if (!validationResult.IsValid)
+            {
+                return BadRequest(new { error = validationResult.ErrorMessage });
+            }
+
+            // Store in database
+            var pathSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "signature-storage-path");
+
+            if (pathSetting == null)
+            {
+                // Create new setting
+                pathSetting = new Setting
+                {
+                    Key = "signature-storage-path",
+                    Value = trimmedPath,
+                    Description = "Signature storage path on the server",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _context.Settings.Add(pathSetting);
+            }
+            else
+            {
+                // Update existing setting
+                pathSetting.Value = trimmedPath;
+                pathSetting.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
+
+            _logger?.LogInformation("Signature storage path updated to: {Path}", trimmedPath);
+
+            return Ok(new { signatureStoragePath = trimmedPath, message = "Signature storage path updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in UpdateSignatureStoragePath: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error processing signature storage path update request", message = ex.Message });
+        }
+    }
+
+    // PUT: api/settings/warning-days
+    [HttpPut("warning-days")]
+    [Authorize(Roles = "Administrator,Admin")]
+    public async Task<IActionResult> UpdateWarningDays([FromBody] UpdateWarningDaysSettingsDto updateDto)
+    {
+        try
+        {
+            // Validate values
+            if (updateDto.DesignerWarningDays < 0 || updateDto.ReviewerWarningDays < 0)
+            {
+                return BadRequest(new { error = "Warning days must be non-negative" });
+            }
+
+            // Update or create designer warning days setting
+            var designerWarningDaysSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "designer-warning-days");
+
+            if (designerWarningDaysSetting == null)
+            {
+                designerWarningDaysSetting = new Setting
+                {
+                    Key = "designer-warning-days",
+                    Value = updateDto.DesignerWarningDays.ToString(),
+                    Description = "Number of days before expected finish date to show warning for designers",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _context.Settings.Add(designerWarningDaysSetting);
+            }
+            else
+            {
+                designerWarningDaysSetting.Value = updateDto.DesignerWarningDays.ToString();
+                designerWarningDaysSetting.UpdatedAt = DateTime.UtcNow;
+            }
+
+            // Update or create reviewer warning days setting
+            var reviewerWarningDaysSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "reviewer-warning-days");
+
+            if (reviewerWarningDaysSetting == null)
+            {
+                reviewerWarningDaysSetting = new Setting
+                {
+                    Key = "reviewer-warning-days",
+                    Value = updateDto.ReviewerWarningDays.ToString(),
+                    Description = "Number of days before confirmation to show warning for reviewers",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _context.Settings.Add(reviewerWarningDaysSetting);
+            }
+            else
+            {
+                reviewerWarningDaysSetting.Value = updateDto.ReviewerWarningDays.ToString();
+                reviewerWarningDaysSetting.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new { 
+                designerWarningDays = updateDto.DesignerWarningDays, 
+                reviewerWarningDays = updateDto.ReviewerWarningDays 
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in UpdateWarningDays: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error updating warning days", message = ex.Message });
         }
     }
 }

@@ -37,5 +37,8 @@ public class UpdateFileItemDto
 
     [StringLength(500)]
     public string? Description { get; set; }
+
+    [StringLength(100)]
+    public string? UploadedBy { get; set; }
 }
 

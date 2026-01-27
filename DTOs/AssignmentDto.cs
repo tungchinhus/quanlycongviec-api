@@ -309,6 +309,9 @@ public class UpdateWorkItemDto
 
     [StringLength(500)]
     public string? Notes { get; set; }
+
+    [StringLength(500)]
+    public string? File_ID { get; set; } // Comma-separated file IDs (e.g., "1,2,3")
 }
 
 public class WorkItemWithAssignmentDto

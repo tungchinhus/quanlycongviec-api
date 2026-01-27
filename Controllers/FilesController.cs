@@ -172,6 +172,9 @@ public class FilesController : ControllerBase
         if (!string.IsNullOrEmpty(dto.Description))
             existingFile.Description = dto.Description;
 
+        if (!string.IsNullOrEmpty(dto.UploadedBy))
+            existingFile.UploadedBy = dto.UploadedBy;
+
         await _context.SaveChangesAsync();
 
         return NoContent();
@@ -720,7 +723,8 @@ public class FilesController : ControllerBase
             {
                 await strategy.ExecuteAsync(async () =>
                 {
-                    await using var transaction = await _context.Database.BeginTransactionAsync();
+                    // Use Serializable isolation level to prevent race condition when uploading multiple files in parallel
+                    await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
                     try
                     {
                         // Create file record - sử dụng uniqueFileName thay vì fileName gốc
@@ -804,16 +808,42 @@ public class FilesController : ControllerBase
                         
                         if (userWorkItems.Any())
                         {
-                            foreach (var workItem in userWorkItems)
+                            // Reload work items from database with row lock to prevent race condition
+                            // This ensures that when multiple files are uploaded in parallel,
+                            // each upload will read the latest File_ID value and update it correctly
+                            var workItemIds = userWorkItems.Select(wi => wi.WorkItemID).ToList();
+                            
+                            // Reload and update work items one by one with proper locking
+                            // This ensures that when multiple files are uploaded in parallel,
+                            // each upload will read the latest File_ID value and update it correctly
+                            foreach (var workItemId in workItemIds)
                             {
-                                // Add file ID to File_ID string if not already present
-                                if (!ContainsFileId(workItem.File_ID, fileItem.Id))
+                                // Reload work item from database within transaction to get latest File_ID
+                                // Using FirstOrDefaultAsync ensures we get fresh data from database
+                                // With Serializable isolation level, this will lock the row until transaction completes
+                                var workItem = await _context.WorkItems
+                                    .FirstOrDefaultAsync(wi => wi.WorkItemID == workItemId);
+                                
+                                if (workItem != null)
                                 {
-                                    workItem.File_ID = AddFileId(workItem.File_ID, fileItem.Id);
+                                    // Add file ID to File_ID string if not already present
+                                    var currentFileId = workItem.File_ID;
+                                    if (!ContainsFileId(currentFileId, fileItem.Id))
+                                    {
+                                        workItem.File_ID = AddFileId(currentFileId, fileItem.Id);
+                                        _logger?.LogInformation("Adding file ID {FileId} to File_ID for WorkItem {WorkItemID}. Old File_ID: {OldFileId}, New File_ID: {NewFileId}", 
+                                            fileItem.Id, workItem.WorkItemID, currentFileId ?? "null", workItem.File_ID);
+                                    }
+                                    else
+                                    {
+                                        _logger?.LogInformation("File ID {FileId} already exists in File_ID for WorkItem {WorkItemID}. Current File_ID: {CurrentFileId}", 
+                                            fileItem.Id, workItem.WorkItemID, currentFileId ?? "null");
+                                    }
                                 }
                             }
+                            
                             _logger?.LogInformation("Added file ID {FileId} to File_ID for {Count} WorkItems of current user (AssignmentID {AssignmentID})", 
-                                fileItem.Id, userWorkItems.Count, assignmentId);
+                                fileItem.Id, workItemIds.Count, assignmentId);
                         }
                         else
                         {

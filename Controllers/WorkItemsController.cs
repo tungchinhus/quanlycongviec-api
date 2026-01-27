@@ -716,6 +716,16 @@ public class WorkItemsController : ControllerBase
                         workItem.Notes = dto.Notes;
                     }
 
+                    // Chỉ update File_ID nếu được cung cấp trong DTO và có giá trị hợp lệ (không null, không empty)
+                    // Nếu không có trong DTO hoặc là null/empty, giữ nguyên giá trị hiện tại (không overwrite)
+                    if (!string.IsNullOrWhiteSpace(dto.File_ID))
+                    {
+                        workItem.File_ID = dto.File_ID;
+                        _logger?.LogInformation("Updated File_ID for WorkItem {WorkItemID} to {FileId}", id, dto.File_ID);
+                    }
+                    // Nếu dto.File_ID là null, empty, hoặc whitespace, giữ nguyên File_ID hiện tại
+                    // Entity Framework sẽ giữ nguyên giá trị hiện tại trong database
+
                     // Save changes first to get updated work item state
                     await _context.SaveChangesAsync();
 

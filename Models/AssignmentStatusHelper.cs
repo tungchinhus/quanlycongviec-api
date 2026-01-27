@@ -49,11 +49,12 @@ public static class AssignmentStatusHelper
     }
 
     /// <summary>
-    /// Tính trạng thái tổng của Assignment dựa trên tất cả WorkItems
+    /// Tính trạng thái tổng của Assignment dựa trên tất cả WorkItems và Approval Status
     /// </summary>
     /// <param name="workItems">Danh sách WorkItems của assignment</param>
+    /// <param name="technicalSheet">TechnicalSheet để kiểm tra approval status (optional)</param>
     /// <returns>1: Mới, 2: Đang xử lý, 3: Hoàn thành</returns>
-    public static int CalculateAssignmentStatus(IEnumerable<WorkItem>? workItems)
+    public static int CalculateAssignmentStatus(IEnumerable<WorkItem>? workItems, TechnicalSheet? technicalSheet = null)
     {
         if (workItems == null || !workItems.Any())
         {
@@ -69,13 +70,30 @@ public static class AssignmentStatusHelper
             return 1; // Mới
         }
 
-        // Nếu tất cả đều là Hoàn thành (3), trạng thái tổng là Hoàn thành
-        if (workItemStatuses.All(s => s == 3))
+        // Kiểm tra xem tất cả work items đã hoàn thành chưa
+        bool allWorkItemsCompleted = workItemStatuses.All(s => s == 3);
+        
+        // Kiểm tra TechnicalSheet approval status
+        bool isFullyApproved = technicalSheet != null &&
+            !string.IsNullOrEmpty(technicalSheet.ManagerL1ApprovalStatus) &&
+            technicalSheet.ManagerL1ApprovalStatus == "Approved" &&
+            !string.IsNullOrEmpty(technicalSheet.ManagerApprovalStatus) &&
+            technicalSheet.ManagerApprovalStatus == "Approved";
+
+        // Chỉ đánh dấu "Hoàn thành" khi:
+        // 1. Tất cả work items đã hoàn thành VÀ
+        // 2. TechnicalSheet đã được ký duyệt hoàn thành (ManagerL1 và Manager đã approve)
+        // Nếu chưa được approve, không thể coi là "Hoàn thành" dù work items đã hoàn thành
+        if (allWorkItemsCompleted && isFullyApproved)
         {
             return 3; // Hoàn thành
         }
+        
+        // Nếu TechnicalSheet đã được approve nhưng work items chưa hoàn thành, vẫn là "Đang xử lý"
+        // (Trường hợp này có thể xảy ra nếu approve trước khi work items hoàn thành)
 
         // Nếu có ít nhất một khâu không còn Mới và ít nhất một khâu chưa Hoàn thành
+        // Hoặc chưa được approve hoàn toàn
         // Trạng thái tổng là Đang xử lý
         return 2; // Đang xử lý
     }
@@ -94,9 +112,10 @@ public static class AssignmentStatusHelper
     {
         try
         {
-            // Load assignment với work items
+            // Load assignment với work items và TechnicalSheet để kiểm tra approval status
             var assignment = await context.MachineAssignments
                 .Include(a => a.WorkItems)
+                .Include(a => a.TechnicalSheet)
                 .FirstOrDefaultAsync(a => a.AssignmentID == assignmentId);
 
             if (assignment == null)
@@ -105,8 +124,8 @@ public static class AssignmentStatusHelper
                 return;
             }
 
-            // Tính trạng thái mới
-            int newStatus = CalculateAssignmentStatus(assignment.WorkItems);
+            // Tính trạng thái mới - kiểm tra cả work items và approval status
+            int newStatus = CalculateAssignmentStatus(assignment.WorkItems, assignment.TechnicalSheet);
 
             // Chỉ cập nhật nếu trạng thái thay đổi
             if (assignment.Status != newStatus)

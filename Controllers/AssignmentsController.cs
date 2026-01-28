@@ -46,6 +46,28 @@ public class AssignmentsController : ControllerBase
                 .OrderByDescending(a => a.AssignmentID)
                 .ToListAsync();
 
+            // Resolve PersonName -> FullName for work items (tiêu đề panel "Thiết kế vỏ - FullName")
+            var personNames = assignments
+                .SelectMany(a => a.WorkItems ?? Enumerable.Empty<WorkItem>())
+                .Where(wi => !string.IsNullOrEmpty(wi.PersonName))
+                .Select(wi => wi.PersonName!)
+                .Distinct()
+                .ToList();
+            var users = await _context.Users
+                .Where(u => personNames.Contains(u.UserName) ||
+                            personNames.Contains(u.FullName ?? "") ||
+                            personNames.Contains(u.UserId.ToString()))
+                .ToListAsync();
+            var personNameToFullName = new Dictionary<string, string>();
+            foreach (var u in users)
+            {
+                if (!string.IsNullOrEmpty(u.UserName))
+                    personNameToFullName[u.UserName] = u.FullName ?? u.UserName;
+                if (!string.IsNullOrEmpty(u.FullName))
+                    personNameToFullName[u.FullName] = u.FullName;
+                personNameToFullName[u.UserId.ToString()] = u.FullName ?? u.UserName ?? "";
+            }
+
             var assignmentDtos = assignments.Select(a => new MachineAssignmentDto
             {
                 AssignmentID = a.AssignmentID,
@@ -99,6 +121,7 @@ public class AssignmentsController : ControllerBase
                     AssignmentID = wi.AssignmentID,
                     WorkType = wi.WorkType,
                     PersonName = wi.PersonName,
+                    FullName = !string.IsNullOrEmpty(wi.PersonName) && personNameToFullName.TryGetValue(wi.PersonName, out var fn) ? fn : wi.PersonName,
                     StartDate = wi.StartDate,
                     ExpectedFinish = wi.ExpectedFinish,
                     ActualFinish = wi.ActualFinish,

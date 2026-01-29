@@ -28,6 +28,79 @@ public class SettingsController : ControllerBase
         _logger = logger;
     }
 
+    // GET: api/settings/sync-interval
+    [HttpGet("sync-interval")]
+    [Authorize(Roles = "Administrator,Admin")]
+    public async Task<IActionResult> GetSyncInterval()
+    {
+        try
+        {
+            var syncIntervalSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "sync-interval-minutes");
+
+            var syncIntervalMinutes = 2; // Default: 2 minutes
+            if (syncIntervalSetting != null)
+            {
+                int.TryParse(syncIntervalSetting.Value, out syncIntervalMinutes);
+                if (syncIntervalMinutes <= 0)
+                {
+                    syncIntervalMinutes = 2;
+                }
+            }
+
+            return Ok(new { syncIntervalMinutes });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in GetSyncInterval: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error retrieving sync interval", message = ex.Message });
+        }
+    }
+
+    // PUT: api/settings/sync-interval
+    [HttpPut("sync-interval")]
+    [Authorize(Roles = "Administrator,Admin")]
+    public async Task<IActionResult> UpdateSyncInterval([FromBody] UpdateSyncIntervalDto updateDto)
+    {
+        try
+        {
+            if (updateDto.SyncIntervalMinutes <= 0)
+            {
+                return BadRequest(new { error = "SyncIntervalMinutes must be greater than 0" });
+            }
+
+            var syncIntervalSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "sync-interval-minutes");
+
+            if (syncIntervalSetting == null)
+            {
+                syncIntervalSetting = new Setting
+                {
+                    Key = "sync-interval-minutes",
+                    Value = updateDto.SyncIntervalMinutes.ToString(),
+                    Description = "Interval (minutes) between sync runs from client PCs to server.",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _context.Settings.Add(syncIntervalSetting);
+            }
+            else
+            {
+                syncIntervalSetting.Value = updateDto.SyncIntervalMinutes.ToString();
+                syncIntervalSetting.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new { syncIntervalMinutes = updateDto.SyncIntervalMinutes });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in UpdateSyncInterval: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error updating sync interval", message = ex.Message });
+        }
+    }
+
     // GET: api/settings
     [HttpGet]
     [Authorize(Roles = "Administrator,Admin")]
@@ -307,13 +380,28 @@ public class SettingsController : ControllerBase
                 ? signaturePathSetting.Value 
                 : Path.Combine(Directory.GetCurrentDirectory(), "signatures"); // Default fallback
 
+            // Get sync interval (minutes) from database
+            var syncIntervalSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "sync-interval-minutes");
+
+            var syncIntervalMinutes = 2; // Default: 2 minutes
+            if (syncIntervalSetting != null)
+            {
+                int.TryParse(syncIntervalSetting.Value, out syncIntervalMinutes);
+                if (syncIntervalMinutes <= 0)
+                {
+                    syncIntervalMinutes = 2;
+                }
+            }
+
             var settings = new SystemSettingsDto
             {
                 FileStoragePath = fileStoragePath,
                 SignatureStoragePath = signatureStoragePath,
                 SendEmailNotifications = sendEmailNotifications,
                 DesignerWarningDays = designerWarningDays,
-                ReviewerWarningDays = reviewerWarningDays
+                ReviewerWarningDays = reviewerWarningDays,
+                SyncIntervalMinutes = syncIntervalMinutes
             };
 
             return Ok(settings);

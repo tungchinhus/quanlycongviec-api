@@ -21,6 +21,11 @@
     <PackageReference Include="EPPlus" Version="7.5.2" />
   </ItemGroup>
 
+  <!-- Loại bỏ toàn bộ mã của project syncToServer khỏi web BE (có csproj riêng) -->
+  <ItemGroup>
+    <Compile Remove="syncToServer\**\*.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="service-account-key.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

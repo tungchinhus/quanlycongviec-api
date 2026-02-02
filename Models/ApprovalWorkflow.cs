@@ -1,3 +1,5 @@
+using quanlyfilesBE.Helpers;
+
 namespace quanlyfilesBE.Models;
 
 public class ApprovalWorkflow
@@ -45,7 +47,7 @@ public class ApprovalWorkflow
     public DateTime? LastNotificationSent { get; set; }
     
     // Metadata
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTimeHelper.NowVietnam();
     public DateTime? UpdatedAt { get; set; }
     public string? CreatedBy { get; set; }
     public string? UpdatedBy { get; set; }

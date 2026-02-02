@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
+using quanlyfilesBE.Helpers;
 using quanlyfilesBE.Services;
 
 namespace quanlyfilesBE.Controllers;
@@ -136,7 +137,7 @@ public class UserSignatureController : ControllerBase
             }
 
             // Tạo tên file duy nhất theo UserId
-            var uniqueFileName = $"signature_{currentUser.UserId}_{DateTime.UtcNow:yyyyMMddHHmmss}{fileExtension}";
+            var uniqueFileName = $"signature_{currentUser.UserId}_{DateTimeHelper.NowVietnam():yyyyMMddHHmmss}{fileExtension}";
             var filePath = Path.Combine(signaturesDirectory, uniqueFileName);
 
             // Xóa file chữ ký cũ nếu có

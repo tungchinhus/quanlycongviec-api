@@ -9,6 +9,7 @@ using System.Text;
 using System.Linq;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
+using quanlyfilesBE.Helpers;
 using quanlyfilesBE.Services;
 
 namespace quanlyfilesBE.Controllers;
@@ -70,7 +71,7 @@ namespace quanlyfilesBE.Controllers;
             FullName = req.FullName,
             Email = req.Email,
             IsActive = true,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTimeHelper.NowVietnam()
         };
 
         _db.Users.Add(user);
@@ -187,7 +188,7 @@ namespace quanlyfilesBE.Controllers;
                 FullName = req.FullName,
                 PasswordHash = string.Empty, // Không cần password cho Firebase auth
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTimeHelper.NowVietnam()
             };
 
             _db.Users.Add(user);
@@ -329,7 +330,7 @@ namespace quanlyfilesBE.Controllers;
                     FullName = name,
                     PasswordHash = string.Empty, // Không cần password cho Firebase auth
                     IsActive = true,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam()
                 };
 
                 _db.Users.Add(user);
@@ -436,7 +437,7 @@ namespace quanlyfilesBE.Controllers;
                     {
                         UserId = user.UserId,
                         RoleId = role.RoleId,
-                        AssignedAt = DateTime.UtcNow
+                        AssignedAt = DateTimeHelper.NowVietnam()
                     });
                 }
                 await _db.SaveChangesAsync();

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using quanlyfilesBE.Helpers;
 
 namespace quanlyfilesBE.Models;
 
@@ -20,7 +21,7 @@ public class PagePermission
 
     public bool IsActive { get; set; } = true;
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTimeHelper.NowVietnam();
 
     public ICollection<UserPagePermission> UserPagePermissions { get; set; } = new List<UserPagePermission>();
 }

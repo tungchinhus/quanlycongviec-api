@@ -4,6 +4,7 @@ using OfficeOpenXml;
 using OfficeOpenXml.Drawing.Chart;
 using System.IO;
 using quanlyfilesBE.DTOs;
+using quanlyfilesBE.Helpers;
 
 namespace quanlyfilesBE.Controllers;
 
@@ -347,7 +348,7 @@ public class ExcelExportController : ControllerBase
                 stream.Position = 0;
 
                 // Tạo tên file với timestamp
-                var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+                var timestamp = DateTimeHelper.NowVietnam().ToString("yyyy-MM-dd_HH-mm-ss");
                 var fileName = $"Thong_ke_so_sanh_thong_so_{timestamp}.xlsx";
 
                 _logger?.LogInformation("Excel file generated successfully: {FileName}, Data Rows: {DataRowCount}, Summary Rows: {SummaryRowCount}, Total Rows: {TotalRowCount}", 

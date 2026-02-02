@@ -6,6 +6,7 @@ using System.Security.Claims;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
+using quanlyfilesBE.Helpers;
 using quanlyfilesBE.Services;
 using quanlyfilesBE.Hubs;
 
@@ -40,7 +41,7 @@ public class WorkItemsController : ControllerBase
     public IActionResult Test()
     {
         _logger?.LogInformation("Test endpoint called");
-        return Ok(new { message = "WorkItemsController is working", timestamp = DateTime.UtcNow });
+        return Ok(new { message = "WorkItemsController is working", timestamp = DateTimeHelper.NowVietnam() });
     }
 
     // GET: api/work-items
@@ -58,12 +59,32 @@ public class WorkItemsController : ControllerBase
 
             var workItems = await query.ToListAsync();
 
+            // Resolve PersonName (có thể là UserId) -> UserName cho cột "Tên" hiển thị username
+            var personIds = workItems
+                .Where(wi => !string.IsNullOrEmpty(wi.PersonName))
+                .Select(wi => wi.PersonName!)
+                .Distinct()
+                .ToList();
+            var users = await _context.Users
+                .Where(u => personIds.Contains(u.UserName) || personIds.Contains(u.FullName ?? "") || personIds.Contains(u.UserId.ToString()))
+                .ToListAsync();
+            var personToUserName = new Dictionary<string, string>();
+            foreach (var u in users)
+            {
+                if (!string.IsNullOrEmpty(u.UserName))
+                    personToUserName[u.UserName] = u.UserName;
+                if (!string.IsNullOrEmpty(u.FullName))
+                    personToUserName[u.FullName] = u.UserName ?? u.FullName;
+                personToUserName[u.UserId.ToString()] = u.UserName ?? u.FullName ?? "";
+            }
+
             var workItemDtos = workItems.Select(wi => new WorkItemDto
             {
                 WorkItemID = wi.WorkItemID,
                 AssignmentID = wi.AssignmentID,
                 WorkType = wi.WorkType,
                 PersonName = wi.PersonName,
+                FullName = !string.IsNullOrEmpty(wi.PersonName) && personToUserName.TryGetValue(wi.PersonName, out var un) ? un : wi.PersonName,
                 StartDate = wi.StartDate,
                 ExpectedFinish = wi.ExpectedFinish,
                 ActualFinish = wi.ActualFinish,
@@ -198,6 +219,13 @@ public class WorkItemsController : ControllerBase
             {
                 query = query.Where(wi => wi.WorkType != null && workTypes.Contains(wi.WorkType));
             }
+
+            // Không hiển thị work items thuộc TBKT đã ký duyệt hoàn toàn (ManagerL1 + Manager đều Approved)
+            // để tránh danh sách công việc thưa / trùng với TBKT đã xong
+            query = query.Where(wi => wi.MachineAssignment == null ||
+                wi.MachineAssignment.TechnicalSheet == null ||
+                wi.MachineAssignment.TechnicalSheet.ManagerL1ApprovalStatus != "Approved" ||
+                wi.MachineAssignment.TechnicalSheet.ManagerApprovalStatus != "Approved");
 
             var workItems = await query
                 .Include(wi => wi.MachineAssignment!)
@@ -998,7 +1026,7 @@ public class WorkItemsController : ControllerBase
                 Message = tbktId,
                 Type = "info",
                 IsRead = false,
-                CreatedAt = DateTime.UtcNow,
+                CreatedAt = DateTimeHelper.NowVietnam(),
                 RelatedEntityType = "WorkItem",
                 RelatedEntityId = workItem.WorkItemID
             };
@@ -1074,7 +1102,7 @@ public class WorkItemsController : ControllerBase
             Message = $"{assignment.MachineName} - {tbktId}",
             Type = "info",
             IsRead = false,
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = DateTimeHelper.NowVietnam(),
             RelatedEntityType = "WorkItem",
             RelatedEntityId = reviewWorkItem.WorkItemID
         };
@@ -1142,7 +1170,7 @@ public class WorkItemsController : ControllerBase
             Message = message,
             Type = "warning",
             IsRead = false,
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = DateTimeHelper.NowVietnam(),
             RelatedEntityType = "WorkItem",
             RelatedEntityId = designWorkItem.WorkItemID
         };

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
 using quanlyfilesBE.Data;
+using quanlyfilesBE.Helpers;
 using quanlyfilesBE.Services;
 using System.Linq;
 using System.Security.Claims;
@@ -700,7 +701,7 @@ public class TechnicalSheetsController : ControllerBase
                 SalesOrder = dto.SalesOrder,
                 HandOverDate = dto.HandOverDate,
                 // Set archivedDate to current date if not provided
-                ArchivedDate = dto.ArchivedDate ?? DateTime.Now,
+                ArchivedDate = dto.ArchivedDate ?? DateTimeHelper.NowVietnam(),
                 RequesterElectrical = dto.RequesterElectrical,
                 RequesterMechanical = dto.RequesterMechanical,
                 Notes = dto.Notes
@@ -1039,7 +1040,7 @@ public class TechnicalSheetsController : ControllerBase
                 // Set ManagerL1 approval (DEPRECATED: Giữ để tương thích ngược)
                 sheet.ManagerL1ApprovalStatus = dto.Action == "approve" ? "Approved" : "Rejected";
                 sheet.ManagerL1ApproverFirebaseUID = currentUserFirebaseUID;
-                sheet.ManagerL1ApprovalDate = DateTime.UtcNow;
+                sheet.ManagerL1ApprovalDate = DateTimeHelper.NowVietnam();
                 sheet.ManagerL1ApprovalNotes = dto.Notes;
 
                 // Ghi vào bảng TechnicalSheetApproval mới (lưu lịch sử)
@@ -1050,9 +1051,9 @@ public class TechnicalSheetsController : ControllerBase
                     ApprovalStatus = dto.Action == "approve" ? "Approved" : "Rejected",
                     ApproverFirebaseUID = currentUserFirebaseUID ?? string.Empty,
                     ApproverName = currentUser?.FullName ?? currentUserEmail ?? "Unknown",
-                    ApprovalDate = DateTime.UtcNow,
+                    ApprovalDate = DateTimeHelper.NowVietnam(),
                     Notes = dto.Notes,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam()
                 };
                 _context.TechnicalSheetApprovals.Add(approval);
 
@@ -1077,7 +1078,7 @@ public class TechnicalSheetsController : ControllerBase
                                 AssignmentID = assignment.AssignmentID,
                                 ApproverRole = "ManagerL1",
                                 ApproverName = currentUser?.FullName ?? currentUserEmail ?? "Unknown",
-                                ApprovalDate = DateTime.UtcNow,
+                                ApprovalDate = DateTimeHelper.NowVietnam(),
                                 Notes = dto.Notes
                             };
                             _context.AssignmentApprovals.Add(assignmentApproval);
@@ -1107,7 +1108,7 @@ public class TechnicalSheetsController : ControllerBase
                 // Set Manager approval (DEPRECATED: Giữ để tương thích ngược)
                 sheet.ManagerApprovalStatus = dto.Action == "approve" ? "Approved" : "Rejected";
                 sheet.ManagerApproverFirebaseUID = currentUserFirebaseUID;
-                sheet.ManagerApprovalDate = DateTime.UtcNow;
+                sheet.ManagerApprovalDate = DateTimeHelper.NowVietnam();
                 sheet.ManagerApprovalNotes = dto.Notes;
 
                 // Ghi vào bảng TechnicalSheetApproval mới (lưu lịch sử)
@@ -1118,9 +1119,9 @@ public class TechnicalSheetsController : ControllerBase
                     ApprovalStatus = dto.Action == "approve" ? "Approved" : "Rejected",
                     ApproverFirebaseUID = currentUserFirebaseUID ?? string.Empty,
                     ApproverName = currentUser?.FullName ?? currentUserEmail ?? "Unknown",
-                    ApprovalDate = DateTime.UtcNow,
+                    ApprovalDate = DateTimeHelper.NowVietnam(),
                     Notes = dto.Notes,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam()
                 };
                 _context.TechnicalSheetApprovals.Add(approval);
 
@@ -1145,7 +1146,7 @@ public class TechnicalSheetsController : ControllerBase
                                 AssignmentID = assignment.AssignmentID,
                                 ApproverRole = "Manager",
                                 ApproverName = currentUser?.FullName ?? currentUserEmail ?? "Unknown",
-                                ApprovalDate = DateTime.UtcNow,
+                                ApprovalDate = DateTimeHelper.NowVietnam(),
                                 Notes = dto.Notes
                             };
                             _context.AssignmentApprovals.Add(assignmentApproval);

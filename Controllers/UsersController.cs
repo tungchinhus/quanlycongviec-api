@@ -5,6 +5,7 @@ using System.Text.Json;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
+using quanlyfilesBE.Helpers;
 using quanlyfilesBE.Services;
 
 namespace quanlyfilesBE.Controllers;
@@ -246,7 +247,7 @@ public class UsersController : ControllerBase
                 FirebaseUID = firebaseUid,
                 PasswordHash = string.Empty, // Không cần password hash vì dùng Firebase auth
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTimeHelper.NowVietnam()
             };
 
             _db.Users.Add(user);
@@ -262,7 +263,7 @@ public class UsersController : ControllerBase
                     {
                         UserId = user.UserId,
                         RoleId = role.RoleId,
-                        AssignedAt = DateTime.UtcNow
+                        AssignedAt = DateTimeHelper.NowVietnam()
                     });
                 }
                 await _db.SaveChangesAsync();
@@ -453,7 +454,7 @@ public class UsersController : ControllerBase
                 {
                     UserId = user.UserId,
                     RoleId = role.RoleId,
-                    AssignedAt = DateTime.UtcNow
+                    AssignedAt = DateTimeHelper.NowVietnam()
                 });
             }
 
@@ -670,7 +671,7 @@ public class UsersController : ControllerBase
                 FirebaseUID = firebaseUid,
                 PasswordHash = string.Empty, // Không cần password hash vì dùng Firebase auth
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTimeHelper.NowVietnam()
             };
 
             _db.Users.Add(user);
@@ -684,7 +685,7 @@ public class UsersController : ControllerBase
                 {
                     UserId = user.UserId,
                     RoleId = role.RoleId,
-                    AssignedAt = DateTime.UtcNow
+                    AssignedAt = DateTimeHelper.NowVietnam()
                 });
             }
             await _db.SaveChangesAsync();
@@ -795,7 +796,7 @@ public class UsersController : ControllerBase
                 FirebaseUID = firebaseUid,
                 PasswordHash = string.Empty, // No password needed for Firebase auth
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTimeHelper.NowVietnam()
             };
 
             _db.Users.Add(user);
@@ -811,7 +812,7 @@ public class UsersController : ControllerBase
                     {
                         UserId = user.UserId,
                         RoleId = role.RoleId,
-                        AssignedAt = DateTime.UtcNow
+                        AssignedAt = DateTimeHelper.NowVietnam()
                     });
                 }
                 await _db.SaveChangesAsync();
@@ -878,7 +879,7 @@ public class UsersController : ControllerBase
                     {
                         UserId = existingUser.UserId,
                         RoleId = role.RoleId,
-                        AssignedAt = DateTime.UtcNow
+                        AssignedAt = DateTimeHelper.NowVietnam()
                     });
                 }
             }
@@ -943,7 +944,7 @@ public class UsersController : ControllerBase
                     {
                         UserId = user.UserId,
                         RoleId = role.RoleId,
-                        AssignedAt = DateTime.UtcNow
+                        AssignedAt = DateTimeHelper.NowVietnam()
                     });
                 }
             }
@@ -1237,7 +1238,7 @@ public class UsersController : ControllerBase
                 {
                     UserId = user.UserId,
                     RoleId = role.RoleId,
-                    AssignedAt = DateTime.UtcNow
+                    AssignedAt = DateTimeHelper.NowVietnam()
                 });
             }
         }
@@ -1320,7 +1321,7 @@ public class UsersController : ControllerBase
                     FirebaseUID = firebaseUid,
                     PasswordHash = string.Empty,
                     IsActive = true,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam()
                 };
 
                 _db.Users.Add(user);
@@ -1366,7 +1367,7 @@ public class UsersController : ControllerBase
                     {
                         UserId = user.UserId,
                         RoleId = role.RoleId,
-                        AssignedAt = DateTime.UtcNow
+                        AssignedAt = DateTimeHelper.NowVietnam()
                     });
                 }
                 await _db.SaveChangesAsync();
@@ -1479,7 +1480,7 @@ public class UsersController : ControllerBase
                 FirebaseUID = firebaseUid,
                 PasswordHash = string.Empty,
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTimeHelper.NowVietnam()
             };
 
             _db.Users.Add(user);
@@ -1511,7 +1512,7 @@ public class UsersController : ControllerBase
                     {
                         UserId = user.UserId,
                         RoleId = role.RoleId,
-                        AssignedAt = DateTime.UtcNow
+                        AssignedAt = DateTimeHelper.NowVietnam()
                     });
                 }
                 await _db.SaveChangesAsync();
@@ -1620,7 +1621,7 @@ public class UsersController : ControllerBase
         {
             UserId = user.UserId,
             RoleId = roleEntity.RoleId,
-            AssignedAt = DateTime.UtcNow
+            AssignedAt = DateTimeHelper.NowVietnam()
         });
 
         await _db.SaveChangesAsync();
@@ -1808,7 +1809,7 @@ public class UsersController : ControllerBase
                     {
                         UserId = localUser.UserId,
                         RoleId = role.RoleId,
-                        AssignedAt = DateTime.UtcNow
+                        AssignedAt = DateTimeHelper.NowVietnam()
                     });
                 }
             }
@@ -1879,7 +1880,7 @@ public class UsersController : ControllerBase
                 {
                     UserId = localUser.UserId,
                     RoleId = roleEntity.RoleId,
-                    AssignedAt = DateTime.UtcNow
+                    AssignedAt = DateTimeHelper.NowVietnam()
                 });
                 await _db.SaveChangesAsync();
             }
@@ -2147,7 +2148,7 @@ public class UsersController : ControllerBase
                             FullName = firebaseUser.DisplayName,
                             PasswordHash = string.Empty, // Không cần password cho Firebase auth
                             IsActive = !firebaseUser.Disabled,
-                            CreatedAt = DateTime.UtcNow
+                            CreatedAt = DateTimeHelper.NowVietnam()
                         };
 
                         _db.Users.Add(localUser);
@@ -2222,7 +2223,7 @@ public class UsersController : ControllerBase
                                 {
                                     UserId = localUser.UserId,
                                     RoleId = role.RoleId,
-                                    AssignedAt = DateTime.UtcNow
+                                    AssignedAt = DateTimeHelper.NowVietnam()
                                 });
                             }
                         }
@@ -2490,11 +2491,11 @@ public class UsersController : ControllerBase
             {
                 var testUser = new User
                 {
-                    UserName = $"test_user_{DateTime.UtcNow.Ticks}",
-                    Email = $"test_{DateTime.UtcNow.Ticks}@test.com",
+                    UserName = $"test_user_{DateTimeHelper.NowVietnam().Ticks}",
+                    Email = $"test_{DateTimeHelper.NowVietnam().Ticks}@test.com",
                     PasswordHash = "test",
                     IsActive = true,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam()
                 };
                 _db.Users.Add(testUser);
                 var savedCount = await _db.SaveChangesAsync();

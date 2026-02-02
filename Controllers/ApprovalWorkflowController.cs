@@ -5,6 +5,7 @@ using System.Security.Claims;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
+using quanlyfilesBE.Helpers;
 using quanlyfilesBE.Services;
 
 namespace quanlyfilesBE.Controllers;
@@ -175,8 +176,8 @@ public class ApprovalWorkflowController : ControllerBase
                 ControlStatus = "Pending",
                 ApprovalStatus = "Pending",
                 OverallStatus = "PendingControl",
-                RequestSentDate = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
+                RequestSentDate = DateTimeHelper.NowVietnam(),
+                CreatedAt = DateTimeHelper.NowVietnam(),
                 CreatedBy = currentUserFirebaseUID
             };
 
@@ -204,7 +205,7 @@ public class ApprovalWorkflowController : ControllerBase
                     // Trigger Power Automate flow
                     await _powerAutomateService.TriggerApprovalFlowAsync(workflowDto, "send_request");
 
-                    workflow.LastNotificationSent = DateTime.UtcNow;
+                    workflow.LastNotificationSent = DateTimeHelper.NowVietnam();
                     await _context.SaveChangesAsync();
                 }
                 catch (Exception powerAutomateEx)
@@ -267,13 +268,13 @@ public class ApprovalWorkflowController : ControllerBase
                 }
             }
 
-            workflow.UpdatedAt = DateTime.UtcNow;
+            workflow.UpdatedAt = DateTimeHelper.NowVietnam();
             workflow.UpdatedBy = currentUserFirebaseUID;
 
             if (dto.UserRole == "controller")
             {
                 // Xử lý hành động kiểm soát
-                workflow.ControlReviewDate = DateTime.UtcNow;
+                workflow.ControlReviewDate = DateTimeHelper.NowVietnam();
                 workflow.ControlNotes = dto.Notes;
 
                 if (dto.Action.ToLower() == "approve")
@@ -296,14 +297,14 @@ public class ApprovalWorkflowController : ControllerBase
                             workflowDto);
 
                         await _powerAutomateService.TriggerApprovalFlowAsync(workflowDto, "control_approved");
-                        workflow.LastNotificationSent = DateTime.UtcNow;
+                        workflow.LastNotificationSent = DateTimeHelper.NowVietnam();
                     }
                 }
                 else if (dto.Action.ToLower() == "reject")
                 {
                     workflow.ControlStatus = "Rejected";
                     workflow.OverallStatus = "Rejected";
-                    workflow.CompletedDate = DateTime.UtcNow;
+                    workflow.CompletedDate = DateTimeHelper.NowVietnam();
 
                     // Gửi email thông báo từ chối cho người gửi
                     if (!string.IsNullOrEmpty(workflow.RequesterEmail))
@@ -318,21 +319,21 @@ public class ApprovalWorkflowController : ControllerBase
                             emailSubject,
                             emailBody,
                             workflowDto);
-                        workflow.LastNotificationSent = DateTime.UtcNow;
+                        workflow.LastNotificationSent = DateTimeHelper.NowVietnam();
                     }
                 }
             }
             else if (dto.UserRole == "approver")
             {
                 // Xử lý hành động xét duyệt
-                workflow.ApprovalDate = DateTime.UtcNow;
+                workflow.ApprovalDate = DateTimeHelper.NowVietnam();
                 workflow.ApprovalNotes = dto.Notes;
 
                 if (dto.Action.ToLower() == "approve")
                 {
                     workflow.ApprovalStatus = "Approved";
                     workflow.OverallStatus = "Completed";
-                    workflow.CompletedDate = DateTime.UtcNow;
+                    workflow.CompletedDate = DateTimeHelper.NowVietnam();
 
                     // Gửi email thông báo hoàn tất cho người gửi
                     if (!string.IsNullOrEmpty(workflow.RequesterEmail))
@@ -349,14 +350,14 @@ public class ApprovalWorkflowController : ControllerBase
                             workflowDto);
 
                         await _powerAutomateService.TriggerApprovalFlowAsync(workflowDto, "approval_completed");
-                        workflow.LastNotificationSent = DateTime.UtcNow;
+                        workflow.LastNotificationSent = DateTimeHelper.NowVietnam();
                     }
                 }
                 else if (dto.Action.ToLower() == "reject")
                 {
                     workflow.ApprovalStatus = "Rejected";
                     workflow.OverallStatus = "Rejected";
-                    workflow.CompletedDate = DateTime.UtcNow;
+                    workflow.CompletedDate = DateTimeHelper.NowVietnam();
 
                     // Gửi email thông báo từ chối cho người gửi
                     if (!string.IsNullOrEmpty(workflow.RequesterEmail))
@@ -371,7 +372,7 @@ public class ApprovalWorkflowController : ControllerBase
                             emailSubject,
                             emailBody,
                             workflowDto);
-                        workflow.LastNotificationSent = DateTime.UtcNow;
+                        workflow.LastNotificationSent = DateTimeHelper.NowVietnam();
                     }
                 }
             }
@@ -426,7 +427,7 @@ public class ApprovalWorkflowController : ControllerBase
             if (!string.IsNullOrEmpty(dto.RequestDescription))
                 workflow.RequestDescription = dto.RequestDescription;
 
-            workflow.UpdatedAt = DateTime.UtcNow;
+            workflow.UpdatedAt = DateTimeHelper.NowVietnam();
             workflow.UpdatedBy = currentUserFirebaseUID;
 
             await _context.SaveChangesAsync();

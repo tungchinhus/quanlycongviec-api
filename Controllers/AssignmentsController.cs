@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.SignalR;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
+using quanlyfilesBE.Helpers;
 using quanlyfilesBE.Services;
 using quanlyfilesBE.Hubs;
 
@@ -46,11 +47,13 @@ public class AssignmentsController : ControllerBase
                 .OrderByDescending(a => a.AssignmentID)
                 .ToListAsync();
 
-            // Resolve PersonName -> FullName for work items (tiêu đề panel "Thiết kế vỏ - FullName")
+            // Resolve PersonName -> UserName cho cột "Tên" hiển thị username (không hiển thị ID)
             var personNames = assignments
                 .SelectMany(a => a.WorkItems ?? Enumerable.Empty<WorkItem>())
                 .Where(wi => !string.IsNullOrEmpty(wi.PersonName))
                 .Select(wi => wi.PersonName!)
+                .Concat(assignments.Select(a => a.Designer).Where(s => !string.IsNullOrEmpty(s)))
+                .Concat(assignments.Select(a => a.TeamLeader).Where(s => !string.IsNullOrEmpty(s)))
                 .Distinct()
                 .ToList();
             var users = await _context.Users
@@ -58,14 +61,14 @@ public class AssignmentsController : ControllerBase
                             personNames.Contains(u.FullName ?? "") ||
                             personNames.Contains(u.UserId.ToString()))
                 .ToListAsync();
-            var personNameToFullName = new Dictionary<string, string>();
+            var personNameToUserName = new Dictionary<string, string>();
             foreach (var u in users)
             {
                 if (!string.IsNullOrEmpty(u.UserName))
-                    personNameToFullName[u.UserName] = u.FullName ?? u.UserName;
+                    personNameToUserName[u.UserName] = u.UserName;
                 if (!string.IsNullOrEmpty(u.FullName))
-                    personNameToFullName[u.FullName] = u.FullName;
-                personNameToFullName[u.UserId.ToString()] = u.FullName ?? u.UserName ?? "";
+                    personNameToUserName[u.FullName] = u.UserName ?? u.FullName;
+                personNameToUserName[u.UserId.ToString()] = u.UserName ?? u.FullName ?? "";
             }
 
             var assignmentDtos = assignments.Select(a => new MachineAssignmentDto
@@ -77,8 +80,8 @@ public class AssignmentsController : ControllerBase
                 StandardRequirement = a.StandardRequirement,
                 AdditionalRequest = a.AdditionalRequest,
                 DeliveryDate = a.DeliveryDate,
-                Designer = a.Designer,
-                TeamLeader = a.TeamLeader,
+                Designer = !string.IsNullOrEmpty(a.Designer) && personNameToUserName.TryGetValue(a.Designer, out var des) ? des : a.Designer,
+                TeamLeader = !string.IsNullOrEmpty(a.TeamLeader) && personNameToUserName.TryGetValue(a.TeamLeader, out var tl) ? tl : a.TeamLeader,
                 FilePath = a.FilePath,
                 Status = a.Status,
                 IsLocked = a.IsLocked,
@@ -121,7 +124,7 @@ public class AssignmentsController : ControllerBase
                     AssignmentID = wi.AssignmentID,
                     WorkType = wi.WorkType,
                     PersonName = wi.PersonName,
-                    FullName = !string.IsNullOrEmpty(wi.PersonName) && personNameToFullName.TryGetValue(wi.PersonName, out var fn) ? fn : wi.PersonName,
+                    FullName = !string.IsNullOrEmpty(wi.PersonName) && personNameToUserName.TryGetValue(wi.PersonName, out var fn) ? fn : wi.PersonName,
                     StartDate = wi.StartDate,
                     ExpectedFinish = wi.ExpectedFinish,
                     ActualFinish = wi.ActualFinish,
@@ -158,6 +161,26 @@ public class AssignmentsController : ControllerBase
                 return NotFound(new { error = "Assignment not found" });
             }
 
+            // Resolve PersonName/Designer/TeamLeader (có thể là UserId) -> UserName cho cột "Tên" hiển thị username
+            var personIds = (assignment.WorkItems ?? Enumerable.Empty<WorkItem>())
+                .Where(wi => !string.IsNullOrEmpty(wi.PersonName))
+                .Select(wi => wi.PersonName!)
+                .Concat(new[] { assignment.Designer, assignment.TeamLeader }.Where(s => !string.IsNullOrEmpty(s)))
+                .Distinct()
+                .ToList();
+            var usersForAssignment = await _context.Users
+                .Where(u => personIds.Contains(u.UserName) || personIds.Contains(u.FullName ?? "") || personIds.Contains(u.UserId.ToString()))
+                .ToListAsync();
+            var personToUserName = new Dictionary<string, string>();
+            foreach (var u in usersForAssignment)
+            {
+                if (!string.IsNullOrEmpty(u.UserName))
+                    personToUserName[u.UserName] = u.UserName;
+                if (!string.IsNullOrEmpty(u.FullName))
+                    personToUserName[u.FullName] = u.UserName ?? u.FullName;
+                personToUserName[u.UserId.ToString()] = u.UserName ?? u.FullName ?? "";
+            }
+
             var assignmentDto = new MachineAssignmentDto
             {
                 AssignmentID = assignment.AssignmentID,
@@ -167,8 +190,8 @@ public class AssignmentsController : ControllerBase
                 StandardRequirement = assignment.StandardRequirement,
                 AdditionalRequest = assignment.AdditionalRequest,
                 DeliveryDate = assignment.DeliveryDate,
-                Designer = assignment.Designer,
-                TeamLeader = assignment.TeamLeader,
+                Designer = !string.IsNullOrEmpty(assignment.Designer) && personToUserName.TryGetValue(assignment.Designer, out var d) ? d : assignment.Designer,
+                TeamLeader = !string.IsNullOrEmpty(assignment.TeamLeader) && personToUserName.TryGetValue(assignment.TeamLeader, out var t) ? t : assignment.TeamLeader,
                 FilePath = assignment.FilePath,
                 Status = assignment.Status,
                 IsLocked = assignment.IsLocked,
@@ -205,12 +228,13 @@ public class AssignmentsController : ControllerBase
                     ChangeType = wc.ChangeType,
                     Description = wc.Description
                 }).ToList(),
-                WorkItems = assignment.WorkItems.Select(wi => new WorkItemDto
+                WorkItems = (assignment.WorkItems ?? Enumerable.Empty<WorkItem>()).Select(wi => new WorkItemDto
                 {
                     WorkItemID = wi.WorkItemID,
                     AssignmentID = wi.AssignmentID,
                     WorkType = wi.WorkType,
                     PersonName = wi.PersonName,
+                    FullName = !string.IsNullOrEmpty(wi.PersonName) && personToUserName.TryGetValue(wi.PersonName, out var un) ? un : wi.PersonName,
                     StartDate = wi.StartDate,
                     ExpectedFinish = wi.ExpectedFinish,
                     ActualFinish = wi.ActualFinish,
@@ -812,7 +836,7 @@ public class AssignmentsController : ControllerBase
                 AssignmentID = id,
                 ApproverRole = dto.ApproverRole,
                 ApproverName = dto.ApproverName,
-                ApprovalDate = dto.ApprovalDate ?? DateTime.Now,
+                ApprovalDate = dto.ApprovalDate ?? DateTimeHelper.NowVietnam(),
                 Notes = dto.Notes
             };
 
@@ -965,6 +989,27 @@ public class AssignmentsController : ControllerBase
                 .AsNoTracking()
                 .ToListAsync();
 
+            // Resolve PersonName/Designer/TeamLeader -> UserName cho cột "Tên" hiển thị username
+            var allPersonIds = workItemsData
+                .Where(wi => !string.IsNullOrEmpty(wi.PersonName))
+                .Select(wi => wi.PersonName!)
+                .Concat(assignments.Select(a => a.Designer).Where(s => !string.IsNullOrEmpty(s)))
+                .Concat(assignments.Select(a => a.TeamLeader).Where(s => !string.IsNullOrEmpty(s)))
+                .Distinct()
+                .ToList();
+            var usersForMyWorkItems = await _context.Users
+                .Where(u => allPersonIds.Contains(u.UserName) || allPersonIds.Contains(u.FullName ?? "") || allPersonIds.Contains(u.UserId.ToString()))
+                .ToListAsync();
+            var personToUserName = new Dictionary<string, string>();
+            foreach (var u in usersForMyWorkItems)
+            {
+                if (!string.IsNullOrEmpty(u.UserName))
+                    personToUserName[u.UserName] = u.UserName;
+                if (!string.IsNullOrEmpty(u.FullName))
+                    personToUserName[u.FullName] = u.UserName ?? u.FullName;
+                personToUserName[u.UserId.ToString()] = u.UserName ?? u.FullName ?? "";
+            }
+
             // Convert PersonConfirmation from string to bool
             bool? ConvertPersonConfirmation(string? rawValue)
             {
@@ -991,6 +1036,20 @@ public class AssignmentsController : ControllerBase
             var workItemDtos = workItemsData.Select(wi => 
             {
                 var assignment = assignments.FirstOrDefault(a => a.AssignmentID == wi.AssignmentID);
+                string? designerUserName = null;
+                string? teamLeaderUserName = null;
+                if (assignment != null)
+                {
+                    if (!string.IsNullOrEmpty(assignment.Designer) && personToUserName.TryGetValue(assignment.Designer, out var d))
+                        designerUserName = d;
+                    else
+                        designerUserName = assignment.Designer;
+                    if (!string.IsNullOrEmpty(assignment.TeamLeader) && personToUserName.TryGetValue(assignment.TeamLeader, out var t))
+                        teamLeaderUserName = t;
+                    else
+                        teamLeaderUserName = assignment.TeamLeader;
+                }
+                var displayName = !string.IsNullOrEmpty(wi.PersonName) && personToUserName.TryGetValue(wi.PersonName, out var un) ? un : wi.PersonName;
                 
                 return new WorkItemWithAssignmentDto
                 {
@@ -998,6 +1057,7 @@ public class AssignmentsController : ControllerBase
                     AssignmentID = wi.AssignmentID,
                     WorkType = wi.WorkType,
                     PersonName = wi.PersonName,
+                    FullName = displayName,
                     StartDate = wi.StartDate,
                     ExpectedFinish = wi.ExpectedFinish,
                     ActualFinish = wi.ActualFinish,
@@ -1012,8 +1072,8 @@ public class AssignmentsController : ControllerBase
                         StandardRequirement = assignment.StandardRequirement,
                         AdditionalRequest = assignment.AdditionalRequest,
                         DeliveryDate = assignment.DeliveryDate,
-                        Designer = assignment.Designer,
-                        TeamLeader = assignment.TeamLeader,
+                        Designer = designerUserName,
+                        TeamLeader = teamLeaderUserName,
                         FilePath = assignment.FilePath,
                         Status = assignment.Status,
                         IsLocked = assignment.IsLocked
@@ -1109,7 +1169,7 @@ public class AssignmentsController : ControllerBase
                 Message = tbktId,
                 Type = "info",
                 IsRead = false,
-                CreatedAt = DateTime.UtcNow,
+                CreatedAt = DateTimeHelper.NowVietnam(),
                 RelatedEntityType = "WorkItem",
                 RelatedEntityId = workItem.WorkItemID
             };
@@ -1238,72 +1298,32 @@ public class AssignmentsController : ControllerBase
                 return StatusCode(403, new { error = "Forbidden", message = "Bạn không có quyền mở khóa assignment này. Chỉ Manager/Admin hoặc user kiểm soát đã xác nhận mới có quyền mở khóa." });
             }
 
-            // Reset personConfirmation của workitem thiết kế (Core Design hoặc Casing Design) về false
-            // Để user thiết kế có thể chỉnh sửa lại sau khi mở khóa
-            // CHỈ reset workitems của user thiết kế tương ứng, không reset tất cả users
-            // Đồng thời reset personConfirmation của workitem kiểm soát (Core Review hoặc Casing Review) về false
-            // CHỈ reset review workitems tương ứng với design workitems đã được reset
+            // Yêu cầu chỉnh sửa: mở lại hết thiết kế, kiểm soát, định mức vật tư.
+            // Reset personConfirmation = false cho TẤT CẢ work item: thiết kế (Core/Casing Design), kiểm soát (Core/Casing Review), định mức vật tư (Material Leveling).
             if (assignment.WorkItems != null && assignment.WorkItems.Any())
             {
-                // Lấy danh sách PersonName của các design workitems (user thiết kế) đã được xác nhận
-                // PersonName có thể là UserId (string), FullName, hoặc UserName
-                var designWorkItemPersonNames = assignment.WorkItems
-                    .Where(wi => wi != null 
-                                 && (wi.WorkType == "Core Design" || wi.WorkType == "Casing Design")
-                                 && wi.PersonConfirmation == true
-                                 && !string.IsNullOrEmpty(wi.PersonName))
-                    .Select(wi => wi.PersonName!)
-                    .Distinct()
+                var typesToReset = new[] { "Core Design", "Casing Design", "Core Review", "Casing Review", "Material Leveling" };
+                var toReset = assignment.WorkItems
+                    .Where(wi => wi != null
+                                 && !string.IsNullOrEmpty(wi.WorkType)
+                                 && typesToReset.Contains(wi.WorkType)
+                                 && wi.PersonConfirmation == true)
                     .ToList();
-                
-                if (designWorkItemPersonNames.Any())
+
+                foreach (var wi in toReset)
                 {
-                    _logger?.LogInformation("Unlocking assignment {AssignmentID}: Found {Count} design user(s) to reset: {PersonNames}", 
-                        id, designWorkItemPersonNames.Count, string.Join(", ", designWorkItemPersonNames));
-                    
-                    // Reset workitem thiết kế - CHỈ reset workitems của user thiết kế tương ứng
-                    var designWorkItems = assignment.WorkItems
-                        .Where(wi => wi != null
-                                     && (wi.WorkType == "Core Design" || wi.WorkType == "Casing Design")
-                                     && wi.PersonConfirmation == true
-                                     && !string.IsNullOrEmpty(wi.PersonName)
-                                     && designWorkItemPersonNames.Contains(wi.PersonName))
-                        .ToList();
-                    
-                    foreach (var designWorkItem in designWorkItems)
+                    if (wi != null)
                     {
-                        if (designWorkItem != null)
-                        {
-                            designWorkItem.PersonConfirmation = false;
-                            _logger?.LogInformation("Reset personConfirmation to false for design workitem {WorkItemID} (WorkType: {WorkType}, PersonName: {PersonName}) when unlocking assignment {AssignmentID}", 
-                                designWorkItem.WorkItemID, designWorkItem.WorkType, designWorkItem.PersonName, id);
-                        }
-                    }
-                    
-                    // Reset workitem kiểm soát - CHỈ reset review workitems tương ứng với design workitems đã reset
-                    // Tìm review workitems có cùng PersonName với design workitems đã được reset
-                    var reviewWorkItems = assignment.WorkItems
-                        .Where(wi => wi != null
-                                     && (wi.WorkType == "Core Review" || wi.WorkType == "Casing Review")
-                                     && wi.PersonConfirmation == true
-                                     && !string.IsNullOrEmpty(wi.PersonName)
-                                     && designWorkItemPersonNames.Contains(wi.PersonName))
-                        .ToList();
-                    
-                    foreach (var reviewWorkItem in reviewWorkItems)
-                    {
-                        if (reviewWorkItem != null)
-                        {
-                            reviewWorkItem.PersonConfirmation = false;
-                            _logger?.LogInformation("Reset personConfirmation to false for review workitem {WorkItemID} (WorkType: {WorkType}, PersonName: {PersonName}) when unlocking assignment {AssignmentID} to update status and show confirm button", 
-                                reviewWorkItem.WorkItemID, reviewWorkItem.WorkType, reviewWorkItem.PersonName, id);
-                        }
+                        wi.PersonConfirmation = false;
+                        _logger?.LogInformation("Reset personConfirmation to false for workitem {WorkItemID} (WorkType: {WorkType}, PersonName: {PersonName}) when unlocking assignment {AssignmentID}", 
+                            wi.WorkItemID, wi.WorkType, wi.PersonName, id);
                     }
                 }
+
+                if (toReset.Count > 0)
+                    _logger?.LogInformation("Unlocking assignment {AssignmentID}: reset {Count} work item(s) (thiết kế, kiểm soát, vật tư)", id, toReset.Count);
                 else
-                {
-                    _logger?.LogWarning("Unlocking assignment {AssignmentID}: No confirmed design workitems found with PersonName, skipping reset", id);
-                }
+                    _logger?.LogInformation("Unlocking assignment {AssignmentID}: No confirmed work items to reset", id);
             }
             else
             {

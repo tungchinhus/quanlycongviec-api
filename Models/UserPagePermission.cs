@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using quanlyfilesBE.Helpers;
 
 namespace quanlyfilesBE.Models;
 
@@ -19,7 +20,7 @@ public class UserPagePermission
     public bool CanEdit { get; set; } = false; // Có thể chỉnh sửa
     public bool CanDelete { get; set; } = false; // Có thể xóa
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTimeHelper.NowVietnam();
     public DateTime? UpdatedAt { get; set; }
 
     // Navigation properties

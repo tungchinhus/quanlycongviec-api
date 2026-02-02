@@ -45,9 +45,21 @@ public class UpdateWarningDaysSettingsDto
 {
     public int DesignerWarningDays { get; set; }
     public int ReviewerWarningDays { get; set; }
-}
-
-public class UpdateSyncIntervalDto
+}public class UpdateSyncIntervalDto
 {
     public int SyncIntervalMinutes { get; set; }
+}/// <summary>Trả về cho GET sync-credentials. Không trả về password.</summary>
+public class SyncNetworkCredentialsDto
+{
+    public string NetworkUsername { get; set; } = string.Empty;
+    public bool HasPassword { get; set; }
+    public string? Domain { get; set; }
+}
+
+/// <summary>Body cho PUT sync-credentials. Lưu vào Settings (sync-network-username, sync-network-password, sync-network-domain).</summary>
+public class UpdateSyncNetworkCredentialsDto
+{
+    public string NetworkUsername { get; set; } = string.Empty;
+    public string? NetworkPassword { get; set; }
+    public string? Domain { get; set; }
 }

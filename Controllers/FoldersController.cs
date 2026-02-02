@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.Data;
+using quanlyfilesBE.Helpers;
 
 namespace quanlyfilesBE.Controllers;
 
@@ -61,7 +62,7 @@ public class FoldersController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        folder.CreatedDate = DateTime.Now;
+        folder.CreatedDate = DateTimeHelper.NowVietnam();
         _context.Folders.Add(folder);
         await _context.SaveChangesAsync();
 

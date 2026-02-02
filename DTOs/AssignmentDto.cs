@@ -320,6 +320,8 @@ public class WorkItemWithAssignmentDto
     public int AssignmentID { get; set; }
     public string? WorkType { get; set; }
     public string? PersonName { get; set; }
+    /// <summary>UserName (hoặc tên hiển thị) đã resolve từ PersonName (ID/UserName/FullName). Dùng cho cột "Tên" trong phiếu phân công.</summary>
+    public string? FullName { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? ExpectedFinish { get; set; }
     public DateTime? ActualFinish { get; set; }

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using quanlyfilesBE.Helpers;
 
 namespace quanlyfilesBE.Services;
 
@@ -27,14 +28,14 @@ public class FileLoggerService : IFileLoggerService
 
     private string GetLogFilePath(string logType = "error")
     {
-        var fileName = $"{logType}-{DateTime.Now:yyyy-MM-dd}.log";
+        var fileName = $"{logType}-{DateTimeHelper.NowVietnam():yyyy-MM-dd}.log";
         return Path.Combine(_logDirectory, fileName);
     }
 
     private async Task WriteLogAsync(string level, string message, Exception? exception = null, string? additionalInfo = null)
     {
         var logEntry = new System.Text.StringBuilder();
-        logEntry.AppendLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [{level}]");
+        logEntry.AppendLine($"[{DateTimeHelper.NowVietnam():yyyy-MM-dd HH:mm:ss.fff}] [{level}]");
         logEntry.AppendLine($"Message: {message}");
         
         if (!string.IsNullOrEmpty(additionalInfo))

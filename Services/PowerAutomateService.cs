@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using quanlyfilesBE.DTOs;
+using quanlyfilesBE.Helpers;
 
 namespace quanlyfilesBE.Services;
 
@@ -77,7 +78,7 @@ public class PowerAutomateService : IPowerAutomateService
                 
                 // Action và metadata
                 action = action, // "send_request", "control_approved", "control_rejected", "approval_completed", "approval_rejected"
-                timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                timestamp = DateTimeHelper.NowVietnam().ToString("yyyy-MM-ddTHH:mm:ss"),
                 
                 // Thông tin bổ sung cho Power Automate
                 workflowUrl = $"{_configuration["AppSettings:BaseUrl"] ?? "http://localhost:4200"}/approval-workflow",
@@ -173,7 +174,7 @@ public class PowerAutomateService : IPowerAutomateService
                 viewWorkflowUrl = $"{_configuration["AppSettings:BaseUrl"] ?? "http://localhost:4200"}/approval-workflow?workflowId={workflow.WorkflowID}",
                 
                 // Timestamp
-                timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                timestamp = DateTimeHelper.NowVietnam().ToString("yyyy-MM-ddTHH:mm:ss")
             };
 
             var response = await _httpClient.PostAsJsonAsync(emailFlowUrl, payload);

@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using quanlyfilesBE.Helpers;
 
 namespace quanlyfilesBE.Models;
 
@@ -30,7 +31,7 @@ public class User
 
     public bool IsActive { get; set; } = true;
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTimeHelper.NowVietnam();
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
 }

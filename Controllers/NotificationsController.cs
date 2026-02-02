@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.Data;
+using quanlyfilesBE.Helpers;
 
 namespace quanlyfilesBE.Controllers;
 
@@ -121,7 +122,7 @@ public class NotificationsController : ControllerBase
             }
 
             notification.IsRead = true;
-            notification.ReadAt = DateTime.UtcNow;
+            notification.ReadAt = DateTimeHelper.NowVietnam();
             await _context.SaveChangesAsync();
 
             return Ok(new { message = "Notification marked as read" });
@@ -152,7 +153,7 @@ public class NotificationsController : ControllerBase
             foreach (var notification in notifications)
             {
                 notification.IsRead = true;
-                notification.ReadAt = DateTime.UtcNow;
+                notification.ReadAt = DateTimeHelper.NowVietnam();
             }
 
             await _context.SaveChangesAsync();
@@ -272,7 +273,7 @@ public class NotificationsController : ControllerBase
                     Message = tbktId,
                     Type = "info",
                     IsRead = false,
-                    CreatedAt = workItem.StartDate ?? DateTime.UtcNow,
+                    CreatedAt = workItem.StartDate ?? DateTimeHelper.NowVietnam(),
                     RelatedEntityType = "WorkItem",
                     RelatedEntityId = workItem.WorkItemID
                 };
@@ -373,7 +374,7 @@ public class NotificationsController : ControllerBase
                     Message = tbktId,
                     Type = "info",
                     IsRead = false,
-                    CreatedAt = workItem.StartDate ?? DateTime.UtcNow,
+                    CreatedAt = workItem.StartDate ?? DateTimeHelper.NowVietnam(),
                     RelatedEntityType = "WorkItem",
                     RelatedEntityId = workItem.WorkItemID
                 };

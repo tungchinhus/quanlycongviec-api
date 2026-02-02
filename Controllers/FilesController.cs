@@ -7,6 +7,7 @@ using System.Security.Claims;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
 using quanlyfilesBE.Data;
+using quanlyfilesBE.Helpers;
 using quanlyfilesBE.Services;
 
 namespace quanlyfilesBE.Controllers;
@@ -142,7 +143,7 @@ public class FilesController : ControllerBase
             FilePath = dto.FilePath,
             FileType = dto.FileType,
             FileSize = dto.FileSize,
-            UploadDate = DateTime.Now,
+            UploadDate = DateTimeHelper.NowVietnam(),
             UploadedBy = dto.UploadedBy,
             Description = dto.Description
         };
@@ -404,7 +405,7 @@ public class FilesController : ControllerBase
         }
         
         // Nếu không tìm được tên duy nhất trong 9999 lần thử, thêm timestamp
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var timestamp = DateTimeHelper.NowVietnam().ToString("yyyyMMdd_HHmmss");
         var timestampFileName = $"{fileNameWithoutExtension}_{timestamp}{extension}";
         _logger?.LogWarning("Using timestamp for unique file name: {OriginalFileName} -> {TimestampFileName}", fileName, timestampFileName);
         return timestampFileName;
@@ -566,7 +567,7 @@ public class FilesController : ControllerBase
                     Message = $"File '{fileItem.FileName}' đã được upload thành công cho máy {assignment.MachineName}",
                     Type = "success",
                     IsRead = false,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = DateTimeHelper.NowVietnam(),
                     RelatedEntityType = "File",
                     RelatedEntityId = fileItem.Id
                 };
@@ -735,7 +736,7 @@ public class FilesController : ControllerBase
                             FilePath = filePath,
                             FileType = fileType,
                             FileSize = file.Length,
-                            UploadDate = DateTime.Now,
+                            UploadDate = DateTimeHelper.NowVietnam(),
                             UploadedBy = uploadedBy,
                             Description = description
                         };

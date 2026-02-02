@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
+using quanlyfilesBE.Helpers;
 
 namespace quanlyfilesBE.Controllers;
 
@@ -100,7 +101,7 @@ public class DashboardController : ControllerBase
                 !wi.ActualFinish.HasValue && 
                 (wi.PersonConfirmation != true) &&
                 wi.ExpectedFinish.HasValue && 
-                wi.ExpectedFinish.Value < DateTime.UtcNow);
+                wi.ExpectedFinish.Value < DateTimeHelper.NowVietnam());
 
             // Lấy danh sách công việc đang xử lý để hiển thị trong tooltip
             // Chỉ lấy những công việc chưa hoàn thành VÀ chưa xác nhận
@@ -173,7 +174,7 @@ public class DashboardController : ControllerBase
 
             // Thống kê theo thời gian (7 ngày gần nhất)
             // Hiển thị cho TẤT CẢ user có WorkType thiết kế (Core Design, Casing Design) và kiểm soát (Core Review, Casing Review)
-            var sevenDaysAgo = DateTime.UtcNow.AddDays(-7);
+            var sevenDaysAgo = DateTimeHelper.NowVietnam().AddDays(-7);
             var designAndControlWorkTypes = new[] { "Core Design", "Casing Design", "Core Review", "Casing Review" };
             
             // Lấy tất cả work items của tất cả user có WorkType thiết kế hoặc kiểm soát trong 7 ngày qua
@@ -298,7 +299,7 @@ public class DashboardController : ControllerBase
             var monthlyStats = new List<object>();
             for (int i = 5; i >= 0; i--)
             {
-                var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1).AddMonths(-i);
+                var monthStart = new DateTime(DateTimeHelper.NowVietnam().Year, DateTimeHelper.NowVietnam().Month, 1).AddMonths(-i);
                 var monthEnd = monthStart.AddMonths(1);
                 
                 var monthWorkItems = myWorkItems
@@ -440,7 +441,7 @@ public class DashboardController : ControllerBase
                 !wi.ActualFinish.HasValue && 
                 (wi.PersonConfirmation != true) &&
                 wi.ExpectedFinish.HasValue && 
-                wi.ExpectedFinish.Value < DateTime.UtcNow);
+                wi.ExpectedFinish.Value < DateTimeHelper.NowVietnam());
             
             var workItemsCompletionRate = totalWorkItems > 0 
                 ? Math.Round((double)completedWorkItems / totalWorkItems * 100, 2) 
@@ -465,7 +466,7 @@ public class DashboardController : ControllerBase
             var monthlyStats = new List<object>();
             for (int i = 5; i >= 0; i--)
             {
-                var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1).AddMonths(-i);
+                var monthStart = new DateTime(DateTimeHelper.NowVietnam().Year, DateTimeHelper.NowVietnam().Month, 1).AddMonths(-i);
                 var monthEnd = monthStart.AddMonths(1);
                 
                 var monthWorkItems = allWorkItems
@@ -488,7 +489,7 @@ public class DashboardController : ControllerBase
             var approvalMonthlyStats = new List<object>();
             for (int i = 5; i >= 0; i--)
             {
-                var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1).AddMonths(-i);
+                var monthStart = new DateTime(DateTimeHelper.NowVietnam().Year, DateTimeHelper.NowVietnam().Month, 1).AddMonths(-i);
                 var monthEnd = monthStart.AddMonths(1);
                 
                 var monthApprovalsL1 = allTechnicalSheets

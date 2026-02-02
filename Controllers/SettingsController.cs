@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
 using quanlyfilesBE.Data;
+using quanlyfilesBE.Helpers;
 using System.IO;
 
 namespace quanlyfilesBE.Controllers;
@@ -26,6 +27,84 @@ public class SettingsController : ControllerBase
         _fileStorageOptions = fileStorageOptions.Value;
         _context = context;
         _logger = logger;
+    }
+
+    // GET: api/settings/sync-credentials
+    [HttpGet("sync-credentials")]
+    [Authorize(Roles = "Administrator,Admin")]
+    public async Task<IActionResult> GetSyncCredentials()
+    {
+        try
+        {
+            var usernameSetting = await _context.Settings.FirstOrDefaultAsync(s => s.Key == "sync-network-username");
+            var passwordSetting = await _context.Settings.FirstOrDefaultAsync(s => s.Key == "sync-network-password");
+            var domainSetting = await _context.Settings.FirstOrDefaultAsync(s => s.Key == "sync-network-domain");
+
+            return Ok(new SyncNetworkCredentialsDto
+            {
+                NetworkUsername = usernameSetting?.Value ?? string.Empty,
+                HasPassword = !string.IsNullOrEmpty(passwordSetting?.Value),
+                Domain = domainSetting?.Value
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in GetSyncCredentials: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error retrieving sync credentials", message = ex.Message });
+        }
+    }
+
+    // PUT: api/settings/sync-credentials
+    [HttpPut("sync-credentials")]
+    [Authorize(Roles = "Administrator,Admin")]
+    public async Task<IActionResult> UpdateSyncCredentials([FromBody] UpdateSyncNetworkCredentialsDto updateDto)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(updateDto.NetworkUsername))
+            {
+                return BadRequest(new { error = "NetworkUsername is required" });
+            }
+
+            await UpsertSettingAsync("sync-network-username", updateDto.NetworkUsername.Trim(), "Sync client: network share username");
+            await UpsertSettingAsync("sync-network-domain", (updateDto.Domain ?? string.Empty).Trim(), "Sync client: network share domain (optional)");
+            if (updateDto.NetworkPassword != null)
+            {
+                await UpsertSettingAsync("sync-network-password", updateDto.NetworkPassword, "Sync client: network share password (stored in DB, not in appsettings)");
+            }
+
+            await _context.SaveChangesAsync();
+
+            _logger?.LogInformation("Sync network credentials updated (Username: {Username})", updateDto.NetworkUsername);
+            return Ok(new { message = "Sync credentials updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in UpdateSyncCredentials: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error updating sync credentials", message = ex.Message });
+        }
+    }
+
+    private async Task UpsertSettingAsync(string key, string value, string description)
+    {
+        var setting = await _context.Settings.FirstOrDefaultAsync(s => s.Key == key);
+        if (setting == null)
+        {
+            setting = new Setting
+            {
+                Key = key,
+                Value = value,
+                Description = description,
+                CreatedAt = DateTimeHelper.NowVietnam(),
+                UpdatedAt = DateTimeHelper.NowVietnam()
+            };
+            _context.Settings.Add(setting);
+        }
+        else
+        {
+            setting.Value = value;
+            setting.UpdatedAt = DateTimeHelper.NowVietnam();
+        }
     }
 
     // GET: api/settings/sync-interval
@@ -79,15 +158,15 @@ public class SettingsController : ControllerBase
                     Key = "sync-interval-minutes",
                     Value = updateDto.SyncIntervalMinutes.ToString(),
                     Description = "Interval (minutes) between sync runs from client PCs to server.",
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam(),
+                    UpdatedAt = DateTimeHelper.NowVietnam()
                 };
                 _context.Settings.Add(syncIntervalSetting);
             }
             else
             {
                 syncIntervalSetting.Value = updateDto.SyncIntervalMinutes.ToString();
-                syncIntervalSetting.UpdatedAt = DateTime.UtcNow;
+                syncIntervalSetting.UpdatedAt = DateTimeHelper.NowVietnam();
             }
 
             await _context.SaveChangesAsync();
@@ -116,8 +195,8 @@ public class SettingsController : ControllerBase
                     Key = "file-storage-path",
                     Value = _fileStorageOptions.Path,
                     Description = "File storage path on the server (configured in appsettings.json)",
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam(),
+                    UpdatedAt = DateTimeHelper.NowVietnam()
                 }
             };
 
@@ -187,8 +266,8 @@ public class SettingsController : ControllerBase
                     Key = "file-storage-path",
                     Value = trimmedPath,
                     Description = "File storage path on the server (overrides appsettings.json)",
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam(),
+                    UpdatedAt = DateTimeHelper.NowVietnam()
                 };
                 _context.Settings.Add(pathSetting);
             }
@@ -196,7 +275,7 @@ public class SettingsController : ControllerBase
             {
                 // Update existing setting
                 pathSetting.Value = trimmedPath;
-                pathSetting.UpdatedAt = DateTime.UtcNow;
+                pathSetting.UpdatedAt = DateTimeHelper.NowVietnam();
             }
 
             await _context.SaveChangesAsync();
@@ -456,8 +535,8 @@ public class SettingsController : ControllerBase
                     Key = "send-email-notifications",
                     Value = updateDto.SendEmailNotifications.ToString(),
                     Description = "If true, send email notifications. If false, show notification badge on bell icon.",
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam(),
+                    UpdatedAt = DateTimeHelper.NowVietnam()
                 };
                 _context.Settings.Add(notificationSetting);
             }
@@ -465,7 +544,7 @@ public class SettingsController : ControllerBase
             {
                 // Update existing setting
                 notificationSetting.Value = updateDto.SendEmailNotifications.ToString();
-                notificationSetting.UpdatedAt = DateTime.UtcNow;
+                notificationSetting.UpdatedAt = DateTimeHelper.NowVietnam();
             }
 
             await _context.SaveChangesAsync();
@@ -568,8 +647,8 @@ public class SettingsController : ControllerBase
                     Key = "signature-storage-path",
                     Value = trimmedPath,
                     Description = "Signature storage path on the server",
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam(),
+                    UpdatedAt = DateTimeHelper.NowVietnam()
                 };
                 _context.Settings.Add(pathSetting);
             }
@@ -577,7 +656,7 @@ public class SettingsController : ControllerBase
             {
                 // Update existing setting
                 pathSetting.Value = trimmedPath;
-                pathSetting.UpdatedAt = DateTime.UtcNow;
+                pathSetting.UpdatedAt = DateTimeHelper.NowVietnam();
             }
 
             await _context.SaveChangesAsync();
@@ -617,15 +696,15 @@ public class SettingsController : ControllerBase
                     Key = "designer-warning-days",
                     Value = updateDto.DesignerWarningDays.ToString(),
                     Description = "Number of days before expected finish date to show warning for designers",
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam(),
+                    UpdatedAt = DateTimeHelper.NowVietnam()
                 };
                 _context.Settings.Add(designerWarningDaysSetting);
             }
             else
             {
                 designerWarningDaysSetting.Value = updateDto.DesignerWarningDays.ToString();
-                designerWarningDaysSetting.UpdatedAt = DateTime.UtcNow;
+                designerWarningDaysSetting.UpdatedAt = DateTimeHelper.NowVietnam();
             }
 
             // Update or create reviewer warning days setting
@@ -639,15 +718,15 @@ public class SettingsController : ControllerBase
                     Key = "reviewer-warning-days",
                     Value = updateDto.ReviewerWarningDays.ToString(),
                     Description = "Number of days before confirmation to show warning for reviewers",
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam(),
+                    UpdatedAt = DateTimeHelper.NowVietnam()
                 };
                 _context.Settings.Add(reviewerWarningDaysSetting);
             }
             else
             {
                 reviewerWarningDaysSetting.Value = updateDto.ReviewerWarningDays.ToString();
-                reviewerWarningDaysSetting.UpdatedAt = DateTime.UtcNow;
+                reviewerWarningDaysSetting.UpdatedAt = DateTimeHelper.NowVietnam();
             }
 
             await _context.SaveChangesAsync();

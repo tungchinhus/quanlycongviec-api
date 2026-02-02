@@ -5,6 +5,7 @@ using System.Security.Claims;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
+using quanlyfilesBE.Helpers;
 
 namespace quanlyfilesBE.Controllers;
 
@@ -246,7 +247,7 @@ public class PagePermissionsController : ControllerBase
                 PageName = dto.PageName,
                 Description = dto.Description,
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTimeHelper.NowVietnam()
             };
 
             _context.PagePermissions.Add(pagePermission);
@@ -307,7 +308,7 @@ public class PagePermissionsController : ControllerBase
                     CanCreate = perm.CanCreate,
                     CanEdit = perm.CanEdit,
                     CanDelete = perm.CanDelete,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTimeHelper.NowVietnam()
                 };
 
                 _context.UserPagePermissions.Add(userPagePermission);
@@ -365,7 +366,7 @@ public class PagePermissionsController : ControllerBase
                     CanCreate = dto.CanCreate,
                     CanEdit = dto.CanEdit,
                     CanDelete = dto.CanDelete,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = DateTimeHelper.NowVietnam(),
                     User = user,
                     PagePermission = pagePermission
                 };
@@ -380,7 +381,7 @@ public class PagePermissionsController : ControllerBase
                 userPagePermission.CanCreate = dto.CanCreate;
                 userPagePermission.CanEdit = dto.CanEdit;
                 userPagePermission.CanDelete = dto.CanDelete;
-                userPagePermission.UpdatedAt = DateTime.UtcNow;
+                userPagePermission.UpdatedAt = DateTimeHelper.NowVietnam();
 
                 await _context.SaveChangesAsync();
             }

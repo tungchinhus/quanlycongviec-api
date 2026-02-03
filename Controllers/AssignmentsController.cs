@@ -47,7 +47,7 @@ public class AssignmentsController : ControllerBase
                 .OrderByDescending(a => a.AssignmentID)
                 .ToListAsync();
 
-            // Resolve PersonName -> UserName cho cột "Tên" hiển thị username (không hiển thị ID)
+            // Resolve PersonName -> tên đầy đủ (FullName) cho hiển thị trên UI
             var personNames = assignments
                 .SelectMany(a => a.WorkItems ?? Enumerable.Empty<WorkItem>())
                 .Where(wi => !string.IsNullOrEmpty(wi.PersonName))
@@ -61,14 +61,15 @@ public class AssignmentsController : ControllerBase
                             personNames.Contains(u.FullName ?? "") ||
                             personNames.Contains(u.UserId.ToString()))
                 .ToListAsync();
-            var personNameToUserName = new Dictionary<string, string>();
+            var personNameToDisplayName = new Dictionary<string, string>();
             foreach (var u in users)
             {
+                var displayName = !string.IsNullOrEmpty(u.FullName) ? u.FullName : (u.UserName ?? "");
                 if (!string.IsNullOrEmpty(u.UserName))
-                    personNameToUserName[u.UserName] = u.UserName;
+                    personNameToDisplayName[u.UserName] = displayName;
                 if (!string.IsNullOrEmpty(u.FullName))
-                    personNameToUserName[u.FullName] = u.UserName ?? u.FullName;
-                personNameToUserName[u.UserId.ToString()] = u.UserName ?? u.FullName ?? "";
+                    personNameToDisplayName[u.FullName] = displayName;
+                personNameToDisplayName[u.UserId.ToString()] = displayName;
             }
 
             var assignmentDtos = assignments.Select(a => new MachineAssignmentDto
@@ -80,8 +81,8 @@ public class AssignmentsController : ControllerBase
                 StandardRequirement = a.StandardRequirement,
                 AdditionalRequest = a.AdditionalRequest,
                 DeliveryDate = a.DeliveryDate,
-                Designer = !string.IsNullOrEmpty(a.Designer) && personNameToUserName.TryGetValue(a.Designer, out var des) ? des : a.Designer,
-                TeamLeader = !string.IsNullOrEmpty(a.TeamLeader) && personNameToUserName.TryGetValue(a.TeamLeader, out var tl) ? tl : a.TeamLeader,
+                Designer = !string.IsNullOrEmpty(a.Designer) && personNameToDisplayName.TryGetValue(a.Designer, out var des) ? des : a.Designer,
+                TeamLeader = !string.IsNullOrEmpty(a.TeamLeader) && personNameToDisplayName.TryGetValue(a.TeamLeader, out var tl) ? tl : a.TeamLeader,
                 FilePath = a.FilePath,
                 Status = a.Status,
                 IsLocked = a.IsLocked,
@@ -124,7 +125,7 @@ public class AssignmentsController : ControllerBase
                     AssignmentID = wi.AssignmentID,
                     WorkType = wi.WorkType,
                     PersonName = wi.PersonName,
-                    FullName = !string.IsNullOrEmpty(wi.PersonName) && personNameToUserName.TryGetValue(wi.PersonName, out var fn) ? fn : wi.PersonName,
+                    FullName = !string.IsNullOrEmpty(wi.PersonName) && personNameToDisplayName.TryGetValue(wi.PersonName, out var fn) ? fn : wi.PersonName,
                     StartDate = wi.StartDate,
                     ExpectedFinish = wi.ExpectedFinish,
                     ActualFinish = wi.ActualFinish,
@@ -161,7 +162,7 @@ public class AssignmentsController : ControllerBase
                 return NotFound(new { error = "Assignment not found" });
             }
 
-            // Resolve PersonName/Designer/TeamLeader (có thể là UserId) -> UserName cho cột "Tên" hiển thị username
+            // Resolve PersonName/Designer/TeamLeader -> tên đầy đủ (FullName) cho hiển thị
             var personIds = (assignment.WorkItems ?? Enumerable.Empty<WorkItem>())
                 .Where(wi => !string.IsNullOrEmpty(wi.PersonName))
                 .Select(wi => wi.PersonName!)
@@ -171,14 +172,15 @@ public class AssignmentsController : ControllerBase
             var usersForAssignment = await _context.Users
                 .Where(u => personIds.Contains(u.UserName) || personIds.Contains(u.FullName ?? "") || personIds.Contains(u.UserId.ToString()))
                 .ToListAsync();
-            var personToUserName = new Dictionary<string, string>();
+            var personToDisplayName = new Dictionary<string, string>();
             foreach (var u in usersForAssignment)
             {
+                var displayName = !string.IsNullOrEmpty(u.FullName) ? u.FullName : (u.UserName ?? "");
                 if (!string.IsNullOrEmpty(u.UserName))
-                    personToUserName[u.UserName] = u.UserName;
+                    personToDisplayName[u.UserName] = displayName;
                 if (!string.IsNullOrEmpty(u.FullName))
-                    personToUserName[u.FullName] = u.UserName ?? u.FullName;
-                personToUserName[u.UserId.ToString()] = u.UserName ?? u.FullName ?? "";
+                    personToDisplayName[u.FullName] = displayName;
+                personToDisplayName[u.UserId.ToString()] = displayName;
             }
 
             var assignmentDto = new MachineAssignmentDto
@@ -190,8 +192,8 @@ public class AssignmentsController : ControllerBase
                 StandardRequirement = assignment.StandardRequirement,
                 AdditionalRequest = assignment.AdditionalRequest,
                 DeliveryDate = assignment.DeliveryDate,
-                Designer = !string.IsNullOrEmpty(assignment.Designer) && personToUserName.TryGetValue(assignment.Designer, out var d) ? d : assignment.Designer,
-                TeamLeader = !string.IsNullOrEmpty(assignment.TeamLeader) && personToUserName.TryGetValue(assignment.TeamLeader, out var t) ? t : assignment.TeamLeader,
+                Designer = !string.IsNullOrEmpty(assignment.Designer) && personToDisplayName.TryGetValue(assignment.Designer, out var d) ? d : assignment.Designer,
+                TeamLeader = !string.IsNullOrEmpty(assignment.TeamLeader) && personToDisplayName.TryGetValue(assignment.TeamLeader, out var t) ? t : assignment.TeamLeader,
                 FilePath = assignment.FilePath,
                 Status = assignment.Status,
                 IsLocked = assignment.IsLocked,
@@ -234,7 +236,7 @@ public class AssignmentsController : ControllerBase
                     AssignmentID = wi.AssignmentID,
                     WorkType = wi.WorkType,
                     PersonName = wi.PersonName,
-                    FullName = !string.IsNullOrEmpty(wi.PersonName) && personToUserName.TryGetValue(wi.PersonName, out var un) ? un : wi.PersonName,
+                    FullName = !string.IsNullOrEmpty(wi.PersonName) && personToDisplayName.TryGetValue(wi.PersonName, out var un) ? un : wi.PersonName,
                     StartDate = wi.StartDate,
                     ExpectedFinish = wi.ExpectedFinish,
                     ActualFinish = wi.ActualFinish,
@@ -1000,14 +1002,15 @@ public class AssignmentsController : ControllerBase
             var usersForMyWorkItems = await _context.Users
                 .Where(u => allPersonIds.Contains(u.UserName) || allPersonIds.Contains(u.FullName ?? "") || allPersonIds.Contains(u.UserId.ToString()))
                 .ToListAsync();
-            var personToUserName = new Dictionary<string, string>();
+            var personToDisplayName = new Dictionary<string, string>();
             foreach (var u in usersForMyWorkItems)
             {
+                var displayName = !string.IsNullOrEmpty(u.FullName) ? u.FullName : (u.UserName ?? "");
                 if (!string.IsNullOrEmpty(u.UserName))
-                    personToUserName[u.UserName] = u.UserName;
+                    personToDisplayName[u.UserName] = displayName;
                 if (!string.IsNullOrEmpty(u.FullName))
-                    personToUserName[u.FullName] = u.UserName ?? u.FullName;
-                personToUserName[u.UserId.ToString()] = u.UserName ?? u.FullName ?? "";
+                    personToDisplayName[u.FullName] = displayName;
+                personToDisplayName[u.UserId.ToString()] = displayName;
             }
 
             // Convert PersonConfirmation from string to bool
@@ -1036,20 +1039,20 @@ public class AssignmentsController : ControllerBase
             var workItemDtos = workItemsData.Select(wi => 
             {
                 var assignment = assignments.FirstOrDefault(a => a.AssignmentID == wi.AssignmentID);
-                string? designerUserName = null;
-                string? teamLeaderUserName = null;
+                string? designerDisplayName = null;
+                string? teamLeaderDisplayName = null;
                 if (assignment != null)
                 {
-                    if (!string.IsNullOrEmpty(assignment.Designer) && personToUserName.TryGetValue(assignment.Designer, out var d))
-                        designerUserName = d;
+                    if (!string.IsNullOrEmpty(assignment.Designer) && personToDisplayName.TryGetValue(assignment.Designer, out var d))
+                        designerDisplayName = d;
                     else
-                        designerUserName = assignment.Designer;
-                    if (!string.IsNullOrEmpty(assignment.TeamLeader) && personToUserName.TryGetValue(assignment.TeamLeader, out var t))
-                        teamLeaderUserName = t;
+                        designerDisplayName = assignment.Designer;
+                    if (!string.IsNullOrEmpty(assignment.TeamLeader) && personToDisplayName.TryGetValue(assignment.TeamLeader, out var t))
+                        teamLeaderDisplayName = t;
                     else
-                        teamLeaderUserName = assignment.TeamLeader;
+                        teamLeaderDisplayName = assignment.TeamLeader;
                 }
-                var displayName = !string.IsNullOrEmpty(wi.PersonName) && personToUserName.TryGetValue(wi.PersonName, out var un) ? un : wi.PersonName;
+                var displayName = !string.IsNullOrEmpty(wi.PersonName) && personToDisplayName.TryGetValue(wi.PersonName, out var un) ? un : wi.PersonName;
                 
                 return new WorkItemWithAssignmentDto
                 {
@@ -1072,8 +1075,8 @@ public class AssignmentsController : ControllerBase
                         StandardRequirement = assignment.StandardRequirement,
                         AdditionalRequest = assignment.AdditionalRequest,
                         DeliveryDate = assignment.DeliveryDate,
-                        Designer = designerUserName,
-                        TeamLeader = teamLeaderUserName,
+                        Designer = designerDisplayName,
+                        TeamLeader = teamLeaderDisplayName,
                         FilePath = assignment.FilePath,
                         Status = assignment.Status,
                         IsLocked = assignment.IsLocked

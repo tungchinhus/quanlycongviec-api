@@ -30,6 +30,12 @@ public class ApplicationDbContext : DbContext
     public DbSet<Notification> Notifications { get; set; }
     public DbSet<TSMay> TSMay { get; set; }
     public DbSet<ApprovalWorkflow> ApprovalWorkflows { get; set; }
+    /// <summary>Index file cho Tra Cứu Files (Python indexer ghi vào đây).</summary>
+    public DbSet<IndexedFile> FileIndex { get; set; }
+    /// <summary>Tiếp nhận thông tin - theo dõi sản phẩm / điện áp (STT, SỐ TNTT, ĐIỆN ÁP, ...).</summary>
+    public DbSet<TiepNhanThongTin> TiepNhanThongTin { get; set; }
+    /// <summary>Hồ sơ thầu (SỐ HST, ĐƠN VỊ MỜI THẦU, ...).</summary>
+    public DbSet<HoSoThau> HoSoThau { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -624,6 +630,68 @@ public class ApplicationDbContext : DbContext
                 .WithMany(p => p.UserPagePermissions)
                 .HasForeignKey(e => e.PagePermissionId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // FileIndex: index file cho Tra Cứu Files (Python indexer)
+        modelBuilder.Entity<IndexedFile>(entity =>
+        {
+            entity.ToTable("FileIndex");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                .ValueGeneratedOnAdd()
+                .HasColumnType("int");
+            entity.Property(e => e.FullPath).IsRequired().HasMaxLength(2000).HasColumnType("nvarchar(2000)");
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(500).HasColumnType("nvarchar(500)");
+            entity.Property(e => e.FolderPath).IsRequired().HasMaxLength(2000).HasColumnType("nvarchar(2000)");
+            entity.Property(e => e.Ext).HasMaxLength(50).HasColumnType("nvarchar(50)");
+            entity.Property(e => e.NameNormalized).HasMaxLength(1000).HasColumnType("nvarchar(1000)");
+            entity.Property(e => e.Mtime).HasColumnType("float");
+            entity.HasIndex(e => e.FolderPath);
+            entity.HasIndex(e => e.NameNormalized);
+            entity.HasIndex(e => e.Ext);
+            entity.HasIndex(e => new { e.FolderPath, e.Mtime }).HasDatabaseName("IX_FileIndex_FolderPath_Mtime");
+        });
+
+        // TiepNhanThongTin - tiếp nhận thông tin / theo dõi sản phẩm điện áp (chỉ SoTNTT là string)
+        modelBuilder.Entity<TiepNhanThongTin>(entity =>
+        {
+            entity.ToTable("TiepNhanThongTin");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd().HasColumnType("int");
+            entity.Property(e => e.SoTNTT).IsRequired().HasMaxLength(50).HasColumnType("nvarchar(50)");
+            entity.Property(e => e.DienAp).IsRequired().HasMaxLength(500).HasColumnType("nvarchar(500)");
+            entity.Property(e => e.SoLuong).HasColumnType("int");
+            entity.Property(e => e.TieuChuan).HasMaxLength(100).HasColumnType("nvarchar(100)");
+            entity.Property(e => e.PhuKienKemTheo).HasMaxLength(255).HasColumnType("nvarchar(255)");
+            entity.Property(e => e.KhachHang).IsRequired().HasMaxLength(255).HasColumnType("nvarchar(255)");
+            entity.Property(e => e.NgayNhan).HasColumnType("date");
+            entity.Property(e => e.NgayGiao).HasColumnType("date");
+            entity.Property(e => e.NgayLuu).HasColumnType("date");
+            entity.Property(e => e.NguoiThucHien).HasMaxLength(255).HasColumnType("nvarchar(255)");
+            entity.Property(e => e.NgayHoanThanh).HasColumnType("date");
+            entity.Property(e => e.GhiChu).HasColumnType("nvarchar(max)");
+            entity.HasIndex(e => e.SoTNTT);
+            entity.HasIndex(e => e.KhachHang);
+            entity.HasIndex(e => e.NgayNhan);
+            entity.HasIndex(e => e.NgayGiao);
+        });
+
+        // HoSoThau - hồ sơ thầu (chỉ SoHST là string)
+        modelBuilder.Entity<HoSoThau>(entity =>
+        {
+            entity.ToTable("HoSoThau");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd().HasColumnType("int");
+            entity.Property(e => e.SoHST).IsRequired().HasMaxLength(20).HasColumnType("nvarchar(20)");
+            entity.Property(e => e.DonViMoiThau).IsRequired().HasMaxLength(255).HasColumnType("nvarchar(255)");
+            entity.Property(e => e.SoTBMTIB).HasMaxLength(50).HasColumnType("nvarchar(50)");
+            entity.Property(e => e.NgayNhan).HasColumnType("date");
+            entity.Property(e => e.NgayGiaoPhongKD).HasColumnType("date");
+            entity.Property(e => e.GhiChu).HasColumnType("nvarchar(max)");
+            entity.HasIndex(e => e.SoHST).IsUnique();
+            entity.HasIndex(e => e.SoTBMTIB);
+            entity.HasIndex(e => e.NgayNhan);
+            entity.HasIndex(e => e.DonViMoiThau);
         });
 
         // Seed initial admin role and permission if table is empty at migration time handled separately

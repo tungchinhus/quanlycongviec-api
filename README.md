@@ -49,6 +49,16 @@ dotnet run
 
 API sẽ chạy tại: `https://localhost:5001` hoặc `http://localhost:5000`
 
+### User test chức năng email
+
+Để test gửi/nhận email (Power Automate, thông báo): tạo user test **tungchinhus@gmail.com** bằng script:
+
+```powershell
+.\Scripts\create-test-email-user.ps1
+```
+
+Chi tiết: [TEST_EMAIL_USER.md](TEST_EMAIL_USER.md)
+
 ## 📡 API Endpoints
 
 ### Files API

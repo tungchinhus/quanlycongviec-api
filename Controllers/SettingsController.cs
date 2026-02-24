@@ -473,14 +473,28 @@ public class SettingsController : ControllerBase
                 }
             }
 
+            // INDEX_ROOTS: đường dẫn ổ mạng (Tra Cứu Files + sync service dùng chung)
+            var indexRootsSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "INDEX_ROOTS");
+            var indexRoots = indexRootsSetting?.Value?.Trim() ?? string.Empty;
+
+            // indexer-scheduled-time: giờ chạy indexer trong ngày (HH:mm). Mặc định 02:00 nếu chưa có value.
+            var indexerScheduledTimeSetting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "indexer-scheduled-time");
+            var indexerScheduledTime = indexerScheduledTimeSetting?.Value?.Trim();
+            if (string.IsNullOrEmpty(indexerScheduledTime))
+                indexerScheduledTime = "02:00";
+
             var settings = new SystemSettingsDto
             {
                 FileStoragePath = fileStoragePath,
                 SignatureStoragePath = signatureStoragePath,
+                IndexRoots = indexRoots,
                 SendEmailNotifications = sendEmailNotifications,
                 DesignerWarningDays = designerWarningDays,
                 ReviewerWarningDays = reviewerWarningDays,
-                SyncIntervalMinutes = syncIntervalMinutes
+                SyncIntervalMinutes = syncIntervalMinutes,
+                IndexerScheduledTime = indexerScheduledTime
             };
 
             return Ok(settings);
@@ -669,6 +683,233 @@ public class SettingsController : ControllerBase
         {
             _logger?.LogError(ex, "Error in UpdateSignatureStoragePath: {Message}", ex.Message);
             return StatusCode(500, new { error = "Error processing signature storage path update request", message = ex.Message });
+        }
+    }
+
+    // GET: api/settings/index-roots
+    [HttpGet("index-roots")]
+    [Authorize]
+    public async Task<IActionResult> GetIndexRoots()
+    {
+        try
+        {
+            var setting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "INDEX_ROOTS");
+            var indexRoots = setting?.Value?.Trim() ?? string.Empty;
+            return Ok(new { indexRoots });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in GetIndexRoots: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error retrieving index roots", message = ex.Message });
+        }
+    }
+
+    // GET: api/settings/search-file-index
+    // Tra Cứu Files: tìm trong bảng FileIndex (SQL Server). Python service gọi qua HTTP, client không cần cài ODBC.
+    [HttpGet("search-file-index")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SearchFileIndex(
+        [FromQuery] string folderPath,
+        [FromQuery] string q,
+        [FromQuery] string? ext = null,
+        [FromQuery] int maxResults = 500)
+    {
+        try
+        {
+            var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+            if (!string.IsNullOrEmpty(remoteIp) && remoteIp != "127.0.0.1" && remoteIp != "::1" && !remoteIp.StartsWith("::ffff:127.0.0.1"))
+            {
+                _logger?.LogWarning("SearchFileIndex called from non-localhost: {IP}", remoteIp);
+                return StatusCode(403, new { error = "Access denied. Only localhost allowed." });
+            }
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                return Ok(new { results = Array.Empty<object>(), usedIndex = true });
+            }
+            var folderPrefix = folderPath.Trim().Replace('/', '\\').TrimEnd('\\');
+            var extList = string.IsNullOrWhiteSpace(ext)
+                ? new List<string>()
+                : ext.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(e => e.Trim().ToLowerInvariant()).ToList();
+            var keywords = string.IsNullOrWhiteSpace(q)
+                ? new List<string>()
+                : q.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(w => w.Trim().ToLowerInvariant())
+                    .Where(w => w.Length > 0)
+                    .ToList();
+            const int scanCap = 4000;
+            // 1) Một query: TOP N theo FolderPath + Mtime (dùng index, có thể covering), 1 round-trip.
+            var candidates = await _context.FileIndex
+                .AsNoTracking()
+                .Where(f => f.FolderPath == folderPrefix || f.FolderPath.StartsWith(folderPrefix + "\\"))
+                .OrderByDescending(f => f.Mtime)
+                .Take(scanCap)
+                .Select(f => new { f.Name, f.FullPath, f.Ext, f.NameNormalized })
+                .ToListAsync();
+            // 2) Lọc theo ext + keyword trong memory (nhanh, không quét thêm DB).
+            var filtered = candidates.AsEnumerable();
+            if (extList.Count > 0)
+                filtered = filtered.Where(f => extList.Contains((f.Ext ?? "").ToLowerInvariant()));
+            foreach (var kw in keywords)
+            {
+                var k = kw;
+                filtered = filtered.Where(f => f.NameNormalized != null && f.NameNormalized.Contains(k));
+            }
+            var results = filtered
+                .Take(Math.Max(1, maxResults))
+                .Select(f => new { name = f.Name, fullPath = f.FullPath })
+                .ToList();
+            return Ok(new { results, usedIndex = true });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in SearchFileIndex: {Message}", ex.Message);
+            return StatusCode(500, new { results = Array.Empty<object>(), error = ex.Message });
+        }
+    }
+
+    // GET: api/settings/indexer-sqlserver-connection-string
+    // Cho phép Python service (chạy cùng server) lấy connection string để lưu index vào SQL Server
+    [HttpGet("indexer-sqlserver-connection-string")]
+    [AllowAnonymous] // Cho phép Python service gọi không cần auth (chạy cùng server)
+    public IActionResult GetIndexerSqlServerConnectionString()
+    {
+        try
+        {
+            // Chỉ cho phép từ localhost để bảo mật
+            var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+            if (!string.IsNullOrEmpty(remoteIp) && remoteIp != "127.0.0.1" && remoteIp != "::1" && !remoteIp.StartsWith("::ffff:127.0.0.1"))
+            {
+                _logger?.LogWarning("GetIndexerSqlServerConnectionString called from non-localhost: {IP}", remoteIp);
+                return StatusCode(403, new { error = "Access denied. Only localhost allowed." });
+            }
+
+            var connectionString = _context.Database.GetConnectionString();
+            if (string.IsNullOrEmpty(connectionString))
+            {
+                return NotFound(new { error = "Connection string not found" });
+            }
+
+            return Ok(new { connectionString });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in GetIndexerSqlServerConnectionString: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error retrieving connection string", message = ex.Message });
+        }
+    }
+
+    // GET: api/settings/indexer-scheduled-time
+    [HttpGet("indexer-scheduled-time")]
+    [Authorize(Roles = "Administrator,Admin")]
+    public async Task<IActionResult> GetIndexerScheduledTime()
+    {
+        try
+        {
+            var setting = await _context.Settings
+                .FirstOrDefaultAsync(s => s.Key == "indexer-scheduled-time");
+            var indexerScheduledTime = setting?.Value?.Trim();
+            if (string.IsNullOrEmpty(indexerScheduledTime))
+                indexerScheduledTime = "02:00";
+            return Ok(new { indexerScheduledTime });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in GetIndexerScheduledTime: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error retrieving indexer scheduled time", message = ex.Message });
+        }
+    }
+
+    // PUT: api/settings/indexer-scheduled-time
+    [HttpPut("indexer-scheduled-time")]
+    [Authorize(Roles = "Administrator,Admin")]
+    public async Task<IActionResult> UpdateIndexerScheduledTime([FromBody] UpdateIndexerScheduledTimeDto updateDto)
+    {
+        try
+        {
+            var value = (updateDto?.IndexerScheduledTime ?? string.Empty).Trim();
+            // Cho phép để trống (tắt chạy theo giờ). Validate format HH:mm nếu có giá trị
+            if (!string.IsNullOrEmpty(value))
+            {
+                if (!System.Text.RegularExpressions.Regex.IsMatch(value, @"^([01]?[0-9]|2[0-3]):[0-5][0-9]$"))
+                {
+                    return BadRequest(new { error = "IndexerScheduledTime must be HH:mm (e.g. 02:00)" });
+                }
+            }
+
+            var setting = await _context.Settings.FirstOrDefaultAsync(s => s.Key == "indexer-scheduled-time");
+            var valueToStore = string.IsNullOrEmpty(value) ? "" : value; // Không lưu null xuống DB
+            if (setting == null)
+            {
+                setting = new Setting
+                {
+                    Key = "indexer-scheduled-time",
+                    Value = valueToStore,
+                    Description = "Giờ trong ngày chạy indexer tìm file (HH:mm). Service Python đọc qua API hoặc env.",
+                    CreatedAt = DateTimeHelper.NowVietnam(),
+                    UpdatedAt = DateTimeHelper.NowVietnam()
+                };
+                _context.Settings.Add(setting);
+            }
+            else
+            {
+                setting.Value = valueToStore;
+                setting.UpdatedAt = DateTimeHelper.NowVietnam();
+            }
+
+            await _context.SaveChangesAsync();
+            _logger?.LogInformation("indexer-scheduled-time updated to: {Value}", valueToStore);
+            return Ok(new { indexerScheduledTime = valueToStore, message = "Indexer scheduled time updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in UpdateIndexerScheduledTime: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error updating indexer scheduled time", message = ex.Message });
+        }
+    }
+
+    // PUT: api/settings/index-roots
+    [HttpPut("index-roots")]
+    [Authorize(Roles = "Administrator,Admin")]
+    public async Task<IActionResult> UpdateIndexRoots([FromBody] UpdateFileStoragePathDto updateDto)
+    {
+        try
+        {
+            var value = (updateDto.Path ?? string.Empty).Trim();
+            // Cho phép để trống (optional)
+            var validationResult = string.IsNullOrEmpty(value) ? new ValidatePathResponseDto { IsValid = true } : ValidatePathInternal(value);
+            if (!validationResult.IsValid)
+            {
+                return BadRequest(new { error = validationResult.ErrorMessage });
+            }
+
+            var setting = await _context.Settings.FirstOrDefaultAsync(s => s.Key == "INDEX_ROOTS");
+            if (setting == null)
+            {
+                setting = new Setting
+                {
+                    Key = "INDEX_ROOTS",
+                    Value = value,
+                    Description = "Đường dẫn ổ mạng (Tra Cứu Files + sync service dùng chung)",
+                    CreatedAt = DateTimeHelper.NowVietnam(),
+                    UpdatedAt = DateTimeHelper.NowVietnam()
+                };
+                _context.Settings.Add(setting);
+            }
+            else
+            {
+                setting.Value = value;
+                setting.UpdatedAt = DateTimeHelper.NowVietnam();
+            }
+
+            await _context.SaveChangesAsync();
+            _logger?.LogInformation("INDEX_ROOTS updated to: {Value}", value);
+            return Ok(new { indexRoots = value, message = "INDEX_ROOTS updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in UpdateIndexRoots: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error updating INDEX_ROOTS", message = ex.Message });
         }
     }
 

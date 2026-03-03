@@ -110,12 +110,23 @@ public class FilesController : ControllerBase
             if (folderPrefix.Length >= 2 && folderPrefix[1] == ':' && (folderPrefix.Length == 2 || folderPrefix[2] == '\\') && folderPrefix.Length > 3)
                 relativePath = folderPrefix.Substring(3).TrimStart('\\');
 
-            var candidates = await _context.FileIndex
+            // Include subfolders: when DB has UNC, match FolderPath that equals or is under the user's folder (e.g. ...\LUU TRU DU LIEU (THAO)\subfolder\...).
+            var relativePathWithSep = relativePath != null && relativePath.Length > 0 ? "\\" + relativePath + "\\" : null;
+            var queryable = _context.FileIndex
                 .AsNoTracking()
                 .Where(f =>
                     f.FolderPath == folderPrefix
                     || f.FolderPath.StartsWith(folderPrefix + "\\")
-                    || (relativePath != null && relativePath.Length > 0 && (f.FolderPath.EndsWith("\\" + relativePath) || f.FolderPath == relativePath)))
+                    || (relativePath != null && relativePath.Length > 0 && (
+                        f.FolderPath.EndsWith("\\" + relativePath)
+                        || f.FolderPath == relativePath
+                        || (relativePathWithSep != null && f.FolderPath.Contains(relativePathWithSep)))));
+
+            // Filter by keywords in SQL so we don't pull 4000 non-matching rows (e.g. Thumbs.db) and miss actual matches.
+            foreach (var kw in keywords)
+                queryable = queryable.Where(f => f.NameNormalized != null && f.NameNormalized.Contains(kw));
+
+            var candidates = await queryable
                 .OrderByDescending(f => f.Mtime)
                 .Take(scanCap)
                 .Select(f => new { f.Name, f.FullPath, f.Ext, f.NameNormalized })
@@ -134,6 +145,7 @@ public class FilesController : ControllerBase
                 .ToList();
 
             var candidatesCount = candidates.Count;
+
             return Ok(new { results, usedIndex = true, candidatesCount });
         }
         catch (Exception ex)

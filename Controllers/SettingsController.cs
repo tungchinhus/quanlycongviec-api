@@ -7,6 +7,8 @@ using quanlyfilesBE.DTOs;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Helpers;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace quanlyfilesBE.Controllers;
 
@@ -27,6 +29,51 @@ public class SettingsController : ControllerBase
         _fileStorageOptions = fileStorageOptions.Value;
         _context = context;
         _logger = logger;
+    }
+
+    // Map ổ mạng (vd. M:) sang UNC (\\server\share) giống logic trong Python service.
+    // Dùng cho SearchFileIndex để khi FE gửi M:\... vẫn khớp với FolderPath UNC trong bảng FileIndex.
+    [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
+    private static extern int WNetGetConnection(
+        string lpLocalName,
+        StringBuilder lpRemoteName,
+        ref int lpnLength);
+
+    private static string? ResolveNetworkDriveToUnc(string? rawPath)
+    {
+        if (string.IsNullOrWhiteSpace(rawPath))
+            return null;
+
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return null;
+
+        var normalized = rawPath.Trim().Replace('/', '\\');
+        var root = Path.GetPathRoot(normalized);
+        if (string.IsNullOrEmpty(root) || root.Length < 2 || root[1] != ':')
+            return null;
+
+        var drive = root.Substring(0, 2); // "M:"
+        var length = 512;
+        var sb = new StringBuilder(length);
+        const int ERROR_MORE_DATA = 234;
+        const int NO_ERROR = 0;
+
+        var result = WNetGetConnection(drive, sb, ref length);
+        if (result == ERROR_MORE_DATA && length > 0)
+        {
+            sb = new StringBuilder(length);
+            result = WNetGetConnection(drive, sb, ref length);
+        }
+
+        if (result != NO_ERROR)
+            return null;
+
+        var uncRoot = sb.ToString().Trim().TrimEnd('\\');
+        if (string.IsNullOrWhiteSpace(uncRoot))
+            return null;
+
+        var rest = normalized.Substring(root.Length).TrimStart('\\');
+        return string.IsNullOrEmpty(rest) ? uncRoot : $"{uncRoot}\\{rest}";
     }
 
     // GET: api/settings/sync-credentials
@@ -728,6 +775,16 @@ public class SettingsController : ControllerBase
                 return Ok(new { results = Array.Empty<object>(), usedIndex = true });
             }
             var folderPrefix = folderPath.Trim().Replace('/', '\\').TrimEnd('\\');
+            var prefixes = new List<string>();
+            if (!string.IsNullOrEmpty(folderPrefix))
+                prefixes.Add(folderPrefix);
+            var uncPrefix = ResolveNetworkDriveToUnc(folderPrefix);
+            if (!string.IsNullOrEmpty(uncPrefix)
+                && !prefixes.Contains(uncPrefix, StringComparer.OrdinalIgnoreCase))
+            {
+                prefixes.Add(uncPrefix.TrimEnd('\\'));
+            }
+
             var extList = string.IsNullOrWhiteSpace(ext)
                 ? new List<string>()
                 : ext.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(e => e.Trim().ToLowerInvariant()).ToList();
@@ -739,9 +796,23 @@ public class SettingsController : ControllerBase
                     .ToList();
             const int scanCap = 4000;
             // 1) Một query: TOP N theo FolderPath + Mtime (dùng index, có thể covering), 1 round-trip.
-            var candidates = await _context.FileIndex
-                .AsNoTracking()
-                .Where(f => f.FolderPath == folderPrefix || f.FolderPath.StartsWith(folderPrefix + "\\"))
+            //    Hỗ trợ cả đường dẫn drive letter (M:\...) và UNC (\\server\share\...).
+            IQueryable<IndexedFile> query = _context.FileIndex.AsNoTracking();
+            if (prefixes.Count == 1)
+            {
+                var p = prefixes[0];
+                query = query.Where(f => f.FolderPath == p || f.FolderPath.StartsWith(p + "\\"));
+            }
+            else if (prefixes.Count >= 2)
+            {
+                var p0 = prefixes[0];
+                var p1 = prefixes[1];
+                query = query.Where(f =>
+                    f.FolderPath == p0 || f.FolderPath.StartsWith(p0 + "\\") ||
+                    f.FolderPath == p1 || f.FolderPath.StartsWith(p1 + "\\"));
+            }
+
+            var candidates = await query
                 .OrderByDescending(f => f.Mtime)
                 .Take(scanCap)
                 .Select(f => new { f.Name, f.FullPath, f.Ext, f.NameNormalized })

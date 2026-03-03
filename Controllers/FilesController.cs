@@ -103,7 +103,7 @@ public class FilesController : ControllerBase
                 .Where(w => w.Length > 0)
                 .ToList();
 
-            const int scanCap = 4000;
+            const int scanCap = 1000;
 
             // Match trực tiếp path HOẶC path tương đương (vd: user nhập M:\P. Thiet Ke\LUU TRU, DB lưu UNC \\server\...\P. Thiet Ke\LUU TRU)
             string? relativePath = null;
@@ -152,6 +152,38 @@ public class FilesController : ControllerBase
         {
             _logger?.LogError(ex, "Error in FilesController.SearchFiles: {Message}", ex.Message);
             return StatusCode(500, new { results = Array.Empty<object>(), error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Mở Windows Explorer và chọn file/folder (chạy trên server). Dùng khi Python client không chạy trên máy user.
+    /// </summary>
+    [HttpGet("open-in-explorer")]
+    public IActionResult OpenInExplorer([FromQuery] string? path = null)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return Ok(new { ok = false, error = "Thiếu path" });
+        if (!OperatingSystem.IsWindows())
+            return Ok(new { ok = false, error = "Chỉ hỗ trợ Windows" });
+        try
+        {
+            var pathNorm = path.Trim().Replace('/', '\\');
+            var args = $"/select,\"{pathNorm.Replace("\"", "\"\"")}\"";
+            using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer",
+                Arguments = args,
+                UseShellExecute = true,
+                CreateNoWindow = false
+            });
+            return Ok(new { ok = true });
+        }
+        catch (Exception ex)
+        {
+            var previewLength = Math.Min(80, path?.Length ?? 0);
+            var preview = path is null ? string.Empty : path.Substring(0, previewLength);
+            _logger?.LogWarning(ex, "OpenInExplorer failed for path: {Path}", preview);
+            return Ok(new { ok = false, error = ex.Message });
         }
     }
 

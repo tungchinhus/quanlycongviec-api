@@ -31,6 +31,9 @@ public class User
 
     public bool IsActive { get; set; } = true;
 
+    /// <summary>True nếu user là nhân viên thiết kế (dùng cho lọc dropdown Người thực hiện, v.v.).</summary>
+    public bool IsDesigner { get; set; } = false;
+
     public DateTime CreatedAt { get; set; } = DateTimeHelper.NowVietnam();
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();

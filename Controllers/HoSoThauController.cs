@@ -23,11 +23,21 @@ public class HoSoThauController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<HoSoThau>>> GetAll()
+    public async Task<ActionResult<IEnumerable<HoSoThau>>> GetAll([FromQuery] string? search = null)
     {
         try
         {
-            var items = await _context.HoSoThau
+            var query = _context.HoSoThau.AsQueryable();
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim().ToLower();
+                query = query.Where(x =>
+                    (x.SoHST != null && x.SoHST.ToLower().Contains(term)) ||
+                    (x.DonViMoiThau != null && x.DonViMoiThau.ToLower().Contains(term)) ||
+                    (x.SoTBMTIB != null && x.SoTBMTIB.ToLower().Contains(term)) ||
+                    (x.GhiChu != null && x.GhiChu.ToLower().Contains(term)));
+            }
+            var items = await query
                 .OrderByDescending(x => x.Id)
                 .ToListAsync();
             return Ok(items);

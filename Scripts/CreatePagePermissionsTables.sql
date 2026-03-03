@@ -65,6 +65,8 @@ BEGIN
         ('/settings', 'Cài đặt', 'Cài đặt hệ thống', 1),
         ('/tbkt-list', 'Danh Sách TBKT', 'Tra cứu thông số MBA', 1),
         ('/tbkt-management', 'Quản Lý Đề Nghị TBKT', 'Quản lý đề nghị TBKT', 1),
+        ('/tiep-nhan-thong-tin', 'Tiếp Nhận Thông Tin', 'Quản lý tiếp nhận thông tin', 1),
+        ('/ho-so-thau', 'Hồ Sơ Thầu', 'Quản lý hồ sơ thầu', 1),
         ('/tsmay', 'TS May', 'Quản lý TS May', 1),
         ('/excel-reader', 'Excel Reader', 'Đọc file Excel', 1);
     

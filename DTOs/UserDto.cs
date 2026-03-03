@@ -8,6 +8,8 @@ public class UserDto
     public string? Email { get; set; }
     public string? FirebaseUID { get; set; }
     public bool IsActive { get; set; }
+    /// <summary>True nếu user là nhân viên thiết kế.</summary>
+    public bool IsDesigner { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<string> Roles { get; set; } = new List<string>();
 }
@@ -28,6 +30,8 @@ public class UserUpdateDto
     public string? FullName { get; set; }
     public string? Email { get; set; }
     public bool? IsActive { get; set; }
+    /// <summary>True/False để đánh dấu user là nhân viên thiết kế hay không.</summary>
+    public bool? IsDesigner { get; set; }
     public List<int>? RoleIds { get; set; }
 }
 

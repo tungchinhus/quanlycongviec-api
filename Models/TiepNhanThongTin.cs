@@ -19,6 +19,12 @@ public class TiepNhanThongTin
     public string? PhuKienKemTheo { get; set; }
     /// <summary>Khách hàng.</summary>
     public string KhachHang { get; set; } = string.Empty;
+    /// <summary>Tháng/Năm (VD: 12/2025, 01/2026).</summary>
+    public string? ThangNam { get; set; }
+    /// <summary>Tên nhân viên Phòng Kinh doanh (P. KD).</summary>
+    public string? TenNVPKD { get; set; }
+    /// <summary>Công suất S (kVA), có thể nhiều giá trị cách nhau bằng dấu phẩy (VD: 2500, 2000, 1600).</summary>
+    public string? SkVA { get; set; }
     /// <summary>Ngày nhận.</summary>
     public DateTime NgayNhan { get; set; }
     /// <summary>Ngày giao sản phẩm.</summary>
@@ -31,4 +37,6 @@ public class TiepNhanThongTin
     public DateTime? NgayHoanThanh { get; set; }
     /// <summary>Ghi chú.</summary>
     public string? GhiChu { get; set; }
+    /// <summary>Phân loại: Tiếp nhận mới | Xuất Khẩu | DVKH | VPMB | Đơn Hàng.</summary>
+    public string? PhanLoai { get; set; }
 }

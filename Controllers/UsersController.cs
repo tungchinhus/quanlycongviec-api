@@ -82,6 +82,7 @@ public class UsersController : ControllerBase
                 Email = u.Email,
                 FirebaseUID = u.FirebaseUID,
                 IsActive = u.IsActive,
+                IsDesigner = u.IsDesigner,
                 CreatedAt = u.CreatedAt,
                 Roles = u.UserRoles?
                     .Where(ur => ur.Role != null && !string.IsNullOrEmpty(ur.Role.RoleName))
@@ -131,6 +132,7 @@ public class UsersController : ControllerBase
             Email = user.Email,
             FirebaseUID = user.FirebaseUID,
             IsActive = user.IsActive,
+            IsDesigner = user.IsDesigner,
             CreatedAt = user.CreatedAt,
             Roles = user.UserRoles?
                 .Where(ur => ur.Role != null && !string.IsNullOrEmpty(ur.Role.RoleName))
@@ -283,6 +285,7 @@ public class UsersController : ControllerBase
                 Email = user.Email,
                 FirebaseUID = user.FirebaseUID,
                 IsActive = user.IsActive,
+                IsDesigner = user.IsDesigner,
                 CreatedAt = user.CreatedAt,
                 Roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList()
             };
@@ -394,10 +397,14 @@ public class UsersController : ControllerBase
             user.Email = dto.Email;
         }
 
-        // Chỉ Admin/Manager mới có thể thay đổi IsActive
+        // Chỉ Admin/Manager mới có thể thay đổi IsActive và IsDesigner
         if (dto.IsActive.HasValue && (isAdmin || isManager))
         {
             user.IsActive = dto.IsActive.Value;
+        }
+        if (dto.IsDesigner.HasValue && (isAdmin || isManager))
+        {
+            user.IsDesigner = dto.IsDesigner.Value;
         }
 
         // Update user info trên Firebase nếu có thay đổi
@@ -498,6 +505,7 @@ public class UsersController : ControllerBase
             Email = user.Email,
             FirebaseUID = user.FirebaseUID,
             IsActive = user.IsActive,
+            IsDesigner = user.IsDesigner,
             CreatedAt = user.CreatedAt,
             Roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList()
         };
@@ -704,6 +712,7 @@ public class UsersController : ControllerBase
                 Email = user.Email,
                 FirebaseUID = user.FirebaseUID,
                 IsActive = user.IsActive,
+                IsDesigner = user.IsDesigner,
                 CreatedAt = user.CreatedAt,
                 Roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList()
             };
@@ -832,6 +841,7 @@ public class UsersController : ControllerBase
                 Email = user.Email,
                 FirebaseUID = user.FirebaseUID,
                 IsActive = user.IsActive,
+                IsDesigner = user.IsDesigner,
                 CreatedAt = user.CreatedAt,
                 Roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList()
             };
@@ -906,6 +916,7 @@ public class UsersController : ControllerBase
             Email = existingUser.Email,
             FirebaseUID = existingUser.FirebaseUID,
             IsActive = existingUser.IsActive,
+            IsDesigner = existingUser.IsDesigner,
             CreatedAt = existingUser.CreatedAt,
             Roles = existingUser.UserRoles.Select(ur => ur.Role.RoleName).ToList()
         };
@@ -976,6 +987,7 @@ public class UsersController : ControllerBase
                 Email = user.Email,
                 FirebaseUID = user.FirebaseUID,
                 IsActive = user.IsActive,
+                IsDesigner = user.IsDesigner,
                 CreatedAt = user.CreatedAt,
                 Roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList()
             };
@@ -1064,6 +1076,7 @@ public class UsersController : ControllerBase
             Email = user.Email,
             FirebaseUID = user.FirebaseUID,
             IsActive = user.IsActive,
+            IsDesigner = user.IsDesigner,
             CreatedAt = user.CreatedAt,
             Roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList()
         };
@@ -1259,6 +1272,7 @@ public class UsersController : ControllerBase
             Email = user.Email,
             FirebaseUID = user.FirebaseUID,
             IsActive = user.IsActive,
+            IsDesigner = user.IsDesigner,
             CreatedAt = user.CreatedAt,
             Roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList()
         };
@@ -1394,6 +1408,7 @@ public class UsersController : ControllerBase
                 Email = user.Email,
                 FirebaseUID = user.FirebaseUID,
                 IsActive = user.IsActive,
+                IsDesigner = user.IsDesigner,
                 CreatedAt = user.CreatedAt,
                 Roles = user.UserRoles?
                     .Where(ur => ur.Role != null && !string.IsNullOrEmpty(ur.Role.RoleName))
@@ -1443,6 +1458,7 @@ public class UsersController : ControllerBase
                     Email = existingUser.Email,
                     FirebaseUID = existingUser.FirebaseUID,
                     IsActive = existingUser.IsActive,
+                    IsDesigner = existingUser.IsDesigner,
                     CreatedAt = existingUser.CreatedAt,
                     Roles = existingUser.UserRoles.Select(ur => ur.Role.RoleName).ToList()
                 };
@@ -1532,6 +1548,7 @@ public class UsersController : ControllerBase
                 Email = user.Email,
                 FirebaseUID = user.FirebaseUID,
                 IsActive = user.IsActive,
+                IsDesigner = user.IsDesigner,
                 CreatedAt = user.CreatedAt,
                 Roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList()
             };
@@ -1611,6 +1628,7 @@ public class UsersController : ControllerBase
                 Email = user.Email,
                 FirebaseUID = user.FirebaseUID,
                 IsActive = user.IsActive,
+                IsDesigner = user.IsDesigner,
                 CreatedAt = user.CreatedAt,
                 Roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList()
             }});
@@ -1678,6 +1696,7 @@ public class UsersController : ControllerBase
             Email = user.Email,
             FirebaseUID = user.FirebaseUID,
             IsActive = user.IsActive,
+            IsDesigner = user.IsDesigner,
             CreatedAt = user.CreatedAt,
             Roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList()
         };
@@ -1937,6 +1956,7 @@ public class UsersController : ControllerBase
                     Email = localUser.Email,
                     FirebaseUID = localUser.FirebaseUID,
                     IsActive = localUser.IsActive,
+                    IsDesigner = localUser.IsDesigner,
                     CreatedAt = localUser.CreatedAt,
                     Roles = allRoleNames
                 }
@@ -2426,6 +2446,7 @@ public class UsersController : ControllerBase
                 Email = u.Email,
                 FirebaseUID = u.FirebaseUID,
                 IsActive = u.IsActive,
+                IsDesigner = u.IsDesigner,
                 CreatedAt = u.CreatedAt,
                 Roles = u.UserRoles?
                     .Where(ur => ur.Role != null && !string.IsNullOrEmpty(ur.Role.RoleName))

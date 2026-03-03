@@ -78,6 +78,71 @@ public class FilesController : ControllerBase
         return ids.Any() ? JoinFileIds(ids) : null;
     }
 
+    // GET: api/Files/search
+    // Tra Cứu Files: tìm trực tiếp trong bảng FileIndex (SQL Server) – không gọi Python.
+    [HttpGet("search")]
+    public async Task<IActionResult> SearchFiles(
+        [FromQuery] string folderPath,
+        [FromQuery(Name = "q")] string query,
+        [FromQuery] string? ext = null,
+        [FromQuery] int maxResults = 500)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(folderPath) || string.IsNullOrWhiteSpace(query))
+            {
+                return Ok(new { results = Array.Empty<object>(), usedIndex = true });
+            }
+
+            var folderPrefix = folderPath.Trim().Replace('/', '\\').TrimEnd('\\');
+            var extList = string.IsNullOrWhiteSpace(ext)
+                ? new List<string>()
+                : ext.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(e => e.Trim().ToLowerInvariant()).ToList();
+            var keywords = query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .Select(w => w.Trim().ToLowerInvariant())
+                .Where(w => w.Length > 0)
+                .ToList();
+
+            const int scanCap = 4000;
+
+            // Match trực tiếp path HOẶC path tương đương (vd: user nhập M:\P. Thiet Ke\LUU TRU, DB lưu UNC \\server\...\P. Thiet Ke\LUU TRU)
+            string? relativePath = null;
+            if (folderPrefix.Length >= 2 && folderPrefix[1] == ':' && (folderPrefix.Length == 2 || folderPrefix[2] == '\\') && folderPrefix.Length > 3)
+                relativePath = folderPrefix.Substring(3).TrimStart('\\');
+
+            var candidates = await _context.FileIndex
+                .AsNoTracking()
+                .Where(f =>
+                    f.FolderPath == folderPrefix
+                    || f.FolderPath.StartsWith(folderPrefix + "\\")
+                    || (relativePath != null && relativePath.Length > 0 && (f.FolderPath.EndsWith("\\" + relativePath) || f.FolderPath == relativePath)))
+                .OrderByDescending(f => f.Mtime)
+                .Take(scanCap)
+                .Select(f => new { f.Name, f.FullPath, f.Ext, f.NameNormalized })
+                .ToListAsync();
+
+            var filtered = candidates.AsEnumerable();
+            if (extList.Count > 0)
+                filtered = filtered.Where(f => extList.Contains((f.Ext ?? string.Empty).ToLowerInvariant()));
+
+            // Logic giống Python: _name_matches_keywords (bỏ dấu, mã có ranh giới, biến thể từ khóa)
+            filtered = filtered.Where(f => FileSearchKeywordHelper.NameMatchesKeywords(f.Name, f.NameNormalized, keywords));
+
+            var results = filtered
+                .Take(Math.Max(1, maxResults))
+                .Select(f => new { name = f.Name, path = f.FullPath, fullPath = f.FullPath })
+                .ToList();
+
+            var candidatesCount = candidates.Count;
+            return Ok(new { results, usedIndex = true, candidatesCount });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in FilesController.SearchFiles: {Message}", ex.Message);
+            return StatusCode(500, new { results = Array.Empty<object>(), error = ex.Message });
+        }
+    }
+
     // GET: api/Files
     [HttpGet]
     public async Task<ActionResult<IEnumerable<FileItem>>> GetFiles()

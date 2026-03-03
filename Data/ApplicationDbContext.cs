@@ -36,6 +36,8 @@ public class ApplicationDbContext : DbContext
     public DbSet<TiepNhanThongTin> TiepNhanThongTin { get; set; }
     /// <summary>Hồ sơ thầu (SỐ HST, ĐƠN VỊ MỜI THẦU, ...).</summary>
     public DbSet<HoSoThau> HoSoThau { get; set; }
+    /// <summary>Máy sửa chữa - ghi nhận TNTT máy sửa chữa theo năm.</summary>
+    public DbSet<MaySuaChua> MaySuaChua { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -670,6 +672,10 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.NguoiThucHien).HasMaxLength(255).HasColumnType("nvarchar(255)");
             entity.Property(e => e.NgayHoanThanh).HasColumnType("date");
             entity.Property(e => e.GhiChu).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.ThangNam).HasMaxLength(20).HasColumnType("nvarchar(20)");
+            entity.Property(e => e.TenNVPKD).HasMaxLength(255).HasColumnType("nvarchar(255)");
+            entity.Property(e => e.SkVA).HasMaxLength(500).HasColumnType("nvarchar(500)");
+            entity.Property(e => e.PhanLoai).HasMaxLength(50).HasColumnType("nvarchar(50)");
             entity.HasIndex(e => e.SoTNTT);
             entity.HasIndex(e => e.KhachHang);
             entity.HasIndex(e => e.NgayNhan);
@@ -692,6 +698,26 @@ public class ApplicationDbContext : DbContext
             entity.HasIndex(e => e.SoTBMTIB);
             entity.HasIndex(e => e.NgayNhan);
             entity.HasIndex(e => e.DonViMoiThau);
+        });
+
+        // MaySuaChua - ghi nhận TNTT máy sửa chữa theo năm (2023-2026)
+        modelBuilder.Entity<MaySuaChua>(entity =>
+        {
+            entity.ToTable("MaySuaChua");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd().HasColumnType("int");
+            entity.Property(e => e.Nam).HasColumnType("int");
+            entity.Property(e => e.SoTNTT_DV_DH_PKD).HasMaxLength(50).HasColumnType("nvarchar(50)");
+            entity.Property(e => e.ThongTinKhachHang).HasMaxLength(500).HasColumnType("nvarchar(500)");
+            entity.Property(e => e.SkVA).HasMaxLength(100).HasColumnType("nvarchar(100)");
+            entity.Property(e => e.DienAp).HasMaxLength(100).HasColumnType("nvarchar(100)");
+            entity.Property(e => e.NgayNhan).HasColumnType("date");
+            entity.Property(e => e.NguoiThucHien).HasMaxLength(255).HasColumnType("nvarchar(255)");
+            entity.Property(e => e.SoMay).HasMaxLength(50).HasColumnType("nvarchar(50)");
+            entity.Property(e => e.SoTBKTSua).HasMaxLength(100).HasColumnType("nvarchar(100)");
+            entity.Property(e => e.GiaoPKD).HasMaxLength(255).HasColumnType("nvarchar(255)");
+            entity.Property(e => e.GhiChu).HasColumnType("nvarchar(max)");
+            entity.HasIndex(e => e.Nam);
         });
 
         // Seed initial admin role and permission if table is empty at migration time handled separately

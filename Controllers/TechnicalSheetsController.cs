@@ -120,11 +120,7 @@ public class TechnicalSheetsController : ControllerBase
             } catch {}
             // #endregion
             
-            // Logic phân quyền:
-            // - User thường: chỉ xem được danh sách đề nghị do chính họ tạo (Proposer = FirebaseUID của họ)
-            // - Manager (managerL, managerL1, managerL2): xem được tất cả đề nghị, bỏ qua firebaseUID parameter
-            
-            // Lấy FirebaseUID từ token của user hiện tại
+            // Lấy FirebaseUID từ token của user hiện tại (chỉ dùng để bảo vệ khi filter theo user khác)
             var currentUserFirebaseUID = User?.FindFirst(ClaimTypes.NameIdentifier)?.Value 
                 ?? User?.FindFirst("sub")?.Value;
             
@@ -145,80 +141,26 @@ public class TechnicalSheetsController : ControllerBase
             } catch {}
             // #endregion
             
+            // Mặc định cho phép tất cả user (đã được Authorize) xem toàn bộ danh sách TBKT.
+            // Tham số firebaseUID (nếu có) chỉ dùng để filter rõ ràng; không còn tự động ép user thường chỉ xem của mình.
             string? filterFirebaseUID = null;
             
-            // Nếu là Manager: bỏ qua firebaseUID parameter, luôn trả về tất cả
-            if (isAdminOrManager)
+            if (!string.IsNullOrEmpty(firebaseUID))
             {
-                _logger?.LogInformation("GetAll: User is Admin/Manager, ignoring firebaseUID parameter, will return all TechnicalSheets");
-                filterFirebaseUID = null; // Không filter, trả về tất cả
-                
-                // #region agent log
-                try {
-                    var logPath = @"c:\MyData\projects\quanlyfiles\quanlyfileFE\.cursor\debug.log";
-                    var logEntry = JsonSerializer.Serialize(new {
-                        id = $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_B",
-                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                        location = "TechnicalSheetsController.cs:69",
-                        message = "Manager branch: filterFirebaseUID set to null",
-                        data = new { isAdminOrManager, filterFirebaseUID = filterFirebaseUID ?? "NULL", firebaseUIDParam = firebaseUID ?? "NULL" },
-                        sessionId = "debug-session",
-                        runId = "run1",
-                        hypothesisId = "B"
+                // Nếu không phải admin/manager thì chỉ cho phép filter theo chính FirebaseUID của họ
+                if (!isAdminOrManager && (string.IsNullOrEmpty(currentUserFirebaseUID) || currentUserFirebaseUID != firebaseUID))
+                {
+                    _logger?.LogWarning("GetAll: User {CurrentFirebaseUID} tried to filter by firebaseUID {RequestedFirebaseUID} but is not admin/manager. Access denied.", 
+                        currentUserFirebaseUID ?? "NULL", firebaseUID);
+                    await _fileLogger.LogWarningAsync($"GetAll: Access denied - CurrentFirebaseUID: {currentUserFirebaseUID ?? "NULL"}, RequestedFirebaseUID: {firebaseUID}");
+                    return BadRequest(new { 
+                        error = "Access denied", 
+                        message = "Bạn chỉ có thể filter theo chính mình. Chỉ Admin/Manager mới có thể filter theo user khác." 
                     });
-                    await System.IO.File.AppendAllTextAsync(logPath, logEntry + "\n");
-                } catch {}
-                // #endregion
-            }
-            else
-            {
-                // User thường: chỉ xem được danh sách của chính họ
-                if (!string.IsNullOrEmpty(firebaseUID))
-                {
-                    // User thường: chỉ cho phép filter theo firebaseUID của chính họ
-                    if (string.IsNullOrEmpty(currentUserFirebaseUID) || currentUserFirebaseUID != firebaseUID)
-                    {
-                        _logger?.LogWarning("GetAll: User {CurrentFirebaseUID} tried to filter by firebaseUID {RequestedFirebaseUID} but is not admin/manager. Access denied.", 
-                            currentUserFirebaseUID ?? "NULL", firebaseUID);
-                        await _fileLogger.LogWarningAsync($"GetAll: Access denied - CurrentFirebaseUID: {currentUserFirebaseUID ?? "NULL"}, RequestedFirebaseUID: {firebaseUID}");
-                        return BadRequest(new { 
-                            error = "Access denied", 
-                            message = "Bạn chỉ có thể xem đề nghị của chính mình. Chỉ Admin/Manager mới có thể filter theo user khác." 
-                        });
-                    }
-                    
-                    filterFirebaseUID = firebaseUID;
-                    _logger?.LogInformation("GetAll: User thường - Filtering by firebaseUID parameter: {FirebaseUID}", filterFirebaseUID);
-                }
-                else
-                {
-                    // User thường: không có firebaseUID parameter, tự động filter theo FirebaseUID của chính họ
-                    if (string.IsNullOrEmpty(currentUserFirebaseUID))
-                    {
-                        _logger?.LogWarning("GetAll: User not found in token. Returning empty list.");
-                        return Ok(new List<TechnicalSheetDto>());
-                    }
-                    
-                    filterFirebaseUID = currentUserFirebaseUID;
-                    _logger?.LogInformation("GetAll: User thường - No firebaseUID parameter, using current user FirebaseUID: {FirebaseUID}", filterFirebaseUID);
                 }
                 
-                // #region agent log
-                try {
-                    var logPath = @"c:\MyData\projects\quanlyfiles\quanlyfileFE\.cursor\debug.log";
-                    var logEntry = JsonSerializer.Serialize(new {
-                        id = $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_E",
-                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                        location = "TechnicalSheetsController.cs:103",
-                        message = "Regular user branch: filterFirebaseUID set",
-                        data = new { isAdminOrManager, filterFirebaseUID = filterFirebaseUID ?? "NULL", currentUserFirebaseUID = currentUserFirebaseUID ?? "NULL", firebaseUIDParam = firebaseUID ?? "NULL" },
-                        sessionId = "debug-session",
-                        runId = "run1",
-                        hypothesisId = "E"
-                    });
-                    await System.IO.File.AppendAllTextAsync(logPath, logEntry + "\n");
-                } catch {}
-                // #endregion
+                filterFirebaseUID = firebaseUID;
+                _logger?.LogInformation("GetAll: Filtering by firebaseUID parameter: {FirebaseUID}", filterFirebaseUID);
             }
             
             // Try to fetch data with explicit type handling
@@ -228,26 +170,17 @@ public class TechnicalSheetsController : ControllerBase
                 var query = _context.TechnicalSheets
                     .Where(s => s.TBKT_ID != null && !string.IsNullOrEmpty(s.TBKT_ID));
                 
-                // Filter theo firebaseUID nếu có (Proposer lưu trực tiếp FirebaseUID)
+                // Filter theo firebaseUID nếu có (Proposer lưu trực tiếp FirebaseUID). Nếu không có, trả về tất cả.
                 if (!string.IsNullOrEmpty(filterFirebaseUID))
                 {
-                    // Trim để xử lý khoảng trắng, so sánh case-insensitive
+                    // Trim để xử lý khoảng trắng.
+                    // Lưu ý: Proposer có thể chứa nhiều FirebaseUID, phân tách bằng dấu phẩy.
                     var trimmedFilterUID = filterFirebaseUID.Trim();
                     query = query.Where(s => !string.IsNullOrEmpty(s.Proposer) && 
-                                             s.Proposer.Trim() == trimmedFilterUID);
-                    _logger?.LogInformation("GetAll: Filtering by Proposer (FirebaseUID) = {FirebaseUID} (trimmed)", trimmedFilterUID);
+                                             s.Proposer.Contains(trimmedFilterUID));
+                    _logger?.LogInformation("GetAll: Filtering by Proposer (FirebaseUID) CONTAINS {FirebaseUID} (trimmed)", trimmedFilterUID);
                 }
-                else if (!isAdminOrManager)
-                {
-                    // Nếu không phải admin/manager và không có filterFirebaseUID, trả về danh sách rỗng
-                    _logger?.LogWarning("GetAll: User is not admin/manager and no firebaseUID provided. Returning empty list.");
-                    return Ok(new List<TechnicalSheetDto>());
-                }
-                else
-                {
-                    // Manager (managerL, managerL1, managerL2): trả về tất cả TechnicalSheets (bao gồm cả Proposer = NULL)
-                    _logger?.LogInformation("GetAll: User is Admin/Manager, returning all TechnicalSheets (including NULL Proposer)");
-                }
+                // Nếu không có filterFirebaseUID: không filter theo Proposer → mọi user thấy toàn bộ danh sách TBKT
 
                 // Filter theo needsApproval nếu có
                 // TechnicalSheet đã hoàn thành (có ArchivedDate) và cần approval
@@ -358,25 +291,14 @@ public class TechnicalSheetsController : ControllerBase
                 {
                     var whereClause = "TBKT_ID IS NOT NULL AND TBKT_ID != ''";
                     
-                    // Thêm filter theo FirebaseUID nếu có (Proposer lưu trực tiếp FirebaseUID)
-                    // Manager: bỏ qua filterFirebaseUID, trả về tất cả
+                    // Thêm filter theo FirebaseUID nếu có (Proposer có thể lưu nhiều FirebaseUID, phân tách bằng dấu phẩy)
                     if (!string.IsNullOrEmpty(filterFirebaseUID))
                     {
                         var trimmedFilterUID = filterFirebaseUID.Trim().Replace("'", "''");
-                        whereClause += $" AND LTRIM(RTRIM(Proposer)) = '{trimmedFilterUID}'";
-                        _logger?.LogInformation("GetAll (SQL fallback): Filtering by Proposer (FirebaseUID) = {FirebaseUID} (trimmed)", trimmedFilterUID);
+                        whereClause += $" AND Proposer IS NOT NULL AND Proposer LIKE '%{trimmedFilterUID}%'";
+                        _logger?.LogInformation("GetAll (SQL fallback): Filtering by Proposer (FirebaseUID) LIKE % {FirebaseUID} % (trimmed)", trimmedFilterUID);
                     }
-                    else if (!isAdminOrManager)
-                    {
-                        // User thường: nếu không có filterFirebaseUID, trả về danh sách rỗng
-                        _logger?.LogWarning("GetAll (SQL fallback): User is not admin/manager and no firebaseUID provided. Returning empty list.");
-                        return Ok(new List<TechnicalSheetDto>());
-                    }
-                    else
-                    {
-                        // Manager: không filter, trả về tất cả
-                        _logger?.LogInformation("GetAll (SQL fallback): User is Admin/Manager, returning all TechnicalSheets");
-                    }
+                    // Nếu không có filterFirebaseUID: không filter theo Proposer → mọi user thấy toàn bộ danh sách TBKT
                     
                     var rawSql = $@"
                         SELECT 

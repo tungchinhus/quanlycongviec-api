@@ -3,7 +3,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.IO;
+using System.Globalization;
 using System.Security.Claims;
+using System.Text;
+using System.Text.RegularExpressions;
 using quanlyfilesBE.Models;
 using quanlyfilesBE.DTOs;
 using quanlyfilesBE.Data;
@@ -20,16 +23,22 @@ public class FilesController : ControllerBase
     private readonly ApplicationDbContext _context;
     private readonly FileStorageOptions _fileStorageOptions;
     private readonly IPowerAutomateService? _powerAutomateService;
+    private readonly ISemanticSearchService _semanticSearchService;
+    private readonly IntentRouterOptions _intentRouterOptions;
     private readonly ILogger<FilesController>? _logger;
 
     public FilesController(
-        ApplicationDbContext context, 
+        ApplicationDbContext context,
         IOptions<FileStorageOptions> fileStorageOptions,
+        IOptions<IntentRouterOptions> intentRouterOptions,
+        ISemanticSearchService semanticSearchService,
         IPowerAutomateService? powerAutomateService = null,
         ILogger<FilesController>? logger = null)
     {
         _context = context;
         _fileStorageOptions = fileStorageOptions.Value;
+        _intentRouterOptions = intentRouterOptions.Value;
+        _semanticSearchService = semanticSearchService;
         _powerAutomateService = powerAutomateService;
         _logger = logger;
     }
@@ -82,23 +91,165 @@ public class FilesController : ControllerBase
     // Tra Cứu Files: tìm trực tiếp trong bảng FileIndex (SQL Server) – không gọi Python.
     [HttpGet("search")]
     public async Task<IActionResult> SearchFiles(
-        [FromQuery] string folderPath,
-        [FromQuery(Name = "q")] string query,
+        [FromQuery] string? folderPath,
+        [FromQuery(Name = "q")] string? query,
         [FromQuery] string? ext = null,
-        [FromQuery] int maxResults = 500)
+        [FromQuery] int maxResults = 500,
+        [FromQuery] bool semantic = false,
+        [FromQuery] string? intentHint = null)
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(folderPath) || string.IsNullOrWhiteSpace(query))
+            var normalizedQuery = query?.Trim() ?? string.Empty;
+            var resolvedIntent = await ResolveIntentAsync(normalizedQuery, semantic, intentHint, HttpContext.RequestAborted);
+            var folderPrefix = (folderPath ?? string.Empty).Trim().Replace('/', '\\').TrimEnd('\\');
+
+            if (string.IsNullOrWhiteSpace(normalizedQuery))
             {
-                return Ok(new { results = Array.Empty<object>(), usedIndex = true });
+                return Ok(new
+                {
+                    intent = resolvedIntent,
+                    results = Array.Empty<object>(),
+                    usedIndex = !semantic,
+                    usedSemantic = semantic
+                });
             }
 
-            var folderPrefix = folderPath.Trim().Replace('/', '\\').TrimEnd('\\');
+            if (string.Equals(resolvedIntent, "reasoning", StringComparison.Ordinal))
+            {
+                // Ưu tiên suy luận dựa trên ngữ cảnh file nếu có folder, để trả lời kiểu:
+                // "thông số ... là gì" theo đúng tài liệu mục tiêu.
+                if (!string.IsNullOrWhiteSpace(folderPrefix))
+                {
+                    var contextual = await _semanticSearchService.SearchAsync(
+                        folderPrefix,
+                        normalizedQuery,
+                        Math.Min(Math.Max(1, maxResults), 5),
+                        HttpContext.RequestAborted);
+                    if (!string.IsNullOrWhiteSpace(contextual.Error))
+                    {
+                        _logger?.LogWarning("Contextual reasoning semantic search failed: {Error}", contextual.Error);
+                    }
+                    else if (contextual.Results.Count > 0)
+                    {
+                        return Ok(new
+                        {
+                            intent = "reasoning",
+                            results = contextual.Results.Select(r => new
+                            {
+                                name = r.Name,
+                                path = r.FullPath,
+                                fullPath = r.FullPath,
+                                score = r.Score,
+                                snippet = r.Snippet
+                            }),
+                            usedIndex = false,
+                            usedSemantic = true,
+                            candidatesCount = contextual.CandidatesCount,
+                            aiAnswer = string.IsNullOrWhiteSpace(contextual.AiAnswer)
+                                ? $"Tai lieu phu hop nhat la: {contextual.Results[0].Name}."
+                                : contextual.AiAnswer
+                        });
+                    }
+                }
+
+                var reasoning = await _semanticSearchService.GenerateReasoningAnswerAsync(
+                    normalizedQuery,
+                    string.IsNullOrWhiteSpace(folderPrefix) ? null : folderPrefix,
+                    HttpContext.RequestAborted);
+
+                var fallback = "Mình chưa thể suy luận câu này lúc này. Bạn có thể thử lại hoặc nhập mã TBKT/GDN để tìm file theo bảng.";
+                if (!string.IsNullOrWhiteSpace(reasoning.Error))
+                {
+                    fallback = $"{fallback} (Chi tiết: {reasoning.Error})";
+                }
+
+                return Ok(new
+                {
+                    intent = "reasoning",
+                    results = Array.Empty<object>(),
+                    usedIndex = false,
+                    usedSemantic = true,
+                    candidatesCount = 0,
+                    aiAnswer = string.IsNullOrWhiteSpace(reasoning.Answer) ? fallback : reasoning.Answer,
+                    error = reasoning.Error
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(folderPrefix))
+            {
+                return Ok(new
+                {
+                    intent = "file_search",
+                    results = Array.Empty<object>(),
+                    usedIndex = !semantic,
+                    usedSemantic = semantic
+                });
+            }
+
+            if (semantic)
+            {
+                var sem = await _semanticSearchService.SearchAsync(folderPrefix, normalizedQuery, maxResults, HttpContext.RequestAborted);
+                if (!string.IsNullOrEmpty(sem.Error))
+                {
+                    return Ok(new
+                    {
+                        intent = "file_search",
+                        results = Array.Empty<object>(),
+                        usedIndex = false,
+                        usedSemantic = true,
+                        candidatesCount = sem.CandidatesCount,
+                        error = sem.Error
+                    });
+                }
+
+                var semResults = sem.Results.Select(r => new
+                {
+                    name = r.Name,
+                    path = r.FullPath,
+                    fullPath = r.FullPath,
+                    score = r.Score,
+                    snippet = r.Snippet
+                }).ToList();
+
+                var aiAnswer = sem.AiAnswer ?? "Da tim thay ket qua tu semantic search.";
+                var strongTokens = BuildStrongTokens(normalizedQuery);
+                if (strongTokens.Count > 0 && semResults.Count > 0)
+                {
+                    var exact = semResults.FirstOrDefault(r =>
+                    {
+                        var normalized = NormalizeAlphaNum(r.fullPath ?? r.path ?? r.name ?? string.Empty);
+                        return strongTokens.All(t => normalized.Contains(t, StringComparison.Ordinal));
+                    });
+                    if (string.IsNullOrWhiteSpace(aiAnswer))
+                        aiAnswer = $"Tai lieu phu hop nhat voi ma TBKT ban hoi la: {(exact ?? semResults.First()).name}.";
+                }
+                else if (semResults.Count > 0)
+                {
+                    var best = semResults.First();
+                    if (string.IsNullOrWhiteSpace(aiAnswer))
+                        aiAnswer = $"Tai lieu phu hop nhat la: {best.name}.";
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(aiAnswer))
+                        aiAnswer = "Khong tim thay tai lieu phu hop tu du lieu da index.";
+                }
+
+                return Ok(new
+                {
+                    intent = "file_search",
+                    results = semResults,
+                    usedIndex = false,
+                    usedSemantic = true,
+                    candidatesCount = sem.CandidatesCount,
+                    aiAnswer
+                });
+            }
             var extList = string.IsNullOrWhiteSpace(ext)
                 ? new List<string>()
                 : ext.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(e => e.Trim().ToLowerInvariant()).ToList();
-            var keywords = query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            var keywords = normalizedQuery.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
                 .Select(w => w.Trim().ToLowerInvariant())
                 .Where(w => w.Length > 0)
                 .ToList();
@@ -146,12 +297,12 @@ public class FilesController : ControllerBase
 
             var candidatesCount = candidates.Count;
 
-            return Ok(new { results, usedIndex = true, candidatesCount });
+            return Ok(new { intent = "file_search", results, usedIndex = true, usedSemantic = false, candidatesCount });
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error in FilesController.SearchFiles: {Message}", ex.Message);
-            return StatusCode(500, new { results = Array.Empty<object>(), error = ex.Message });
+            return StatusCode(500, new { intent = "file_search", results = Array.Empty<object>(), error = ex.Message });
         }
     }
 
@@ -185,6 +336,170 @@ public class FilesController : ControllerBase
             _logger?.LogWarning(ex, "OpenInExplorer failed for path: {Path}", preview);
             return Ok(new { ok = false, error = ex.Message });
         }
+    }
+
+    // GET: api/Files/download-by-path?path=...
+    [HttpGet("download-by-path")]
+    public async Task<IActionResult> DownloadByPath([FromQuery] string? path = null)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return BadRequest(new { message = "Thiếu path" });
+
+        try
+        {
+            var normalized = path.Trim().Replace('/', '\\');
+            if (!Path.IsPathRooted(normalized))
+                return BadRequest(new { message = "Path phải là đường dẫn tuyệt đối" });
+            if (!System.IO.File.Exists(normalized))
+                return NotFound(new { message = "File không tồn tại trên server" });
+
+            var fileBytes = await System.IO.File.ReadAllBytesAsync(normalized);
+            var fileName = Path.GetFileName(normalized);
+            var contentType = GetContentType(fileName);
+            return File(fileBytes, contentType, fileName);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "DownloadByPath failed: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Error downloading file by path", message = ex.Message });
+        }
+    }
+
+    private static List<string> BuildStrongTokens(string query)
+    {
+        return Regex.Matches((query ?? string.Empty).ToLowerInvariant(), "[a-z0-9]+")
+            .Select(m => m.Value)
+            .Where(v => v.Length >= 4 && v.Any(char.IsDigit) && v.Any(char.IsLetter))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static string NormalizeAlphaNum(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return string.Empty;
+        return Regex.Replace(value.ToLowerInvariant(), "[^a-z0-9]", "");
+    }
+
+    private async Task<string> ResolveIntentAsync(string query, bool semantic, string? intentHint, CancellationToken cancellationToken)
+    {
+        if (!semantic)
+            return "file_search";
+
+        var hint = (intentHint ?? "auto").Trim().ToLowerInvariant();
+        if (hint is not ("auto" or "file_search" or "reasoning"))
+            hint = "auto";
+
+        if (!_intentRouterOptions.Enabled)
+            return hint == "reasoning" ? "reasoning" : "file_search";
+
+        // Query co ma TBKT/GDN + hoi noi dung/chi tiet => uu tien reasoning theo ngu canh file.
+        if (LooksLikeFileContentQuestion(query))
+            return "reasoning";
+
+        var fileScore = _intentRouterOptions.FileSearchBias;
+        var reasoningScore = _intentRouterOptions.ReasoningBias;
+
+        if (hint == "file_search") fileScore += 2;
+        if (hint == "reasoning") reasoningScore += 2;
+
+        if (LooksLikeFileRequest(query)) fileScore += 4;
+        if (LooksLikeReasoningRequest(query)) reasoningScore += 3;
+
+        if (_intentRouterOptions.UseGemmaIntentDetection)
+        {
+            // Chi goi Gemma khi truong hop khong ro rang hoac hint=auto.
+            var closeScore = Math.Abs(fileScore - reasoningScore) <= 2;
+            if (closeScore || hint == "auto")
+            {
+                var det = await _semanticSearchService.DetectIntentAsync(query, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(det.Error))
+                {
+                    _logger?.LogWarning("Gemma intent detection fallback to heuristic: {Error}", det.Error);
+                }
+                else if (det.Confidence >= Math.Max(0.0, Math.Min(1.0, _intentRouterOptions.GemmaMinConfidence)))
+                {
+                    return det.Intent == "reasoning" ? "reasoning" : "file_search";
+                }
+            }
+        }
+
+        // Truy van mo ho mac dinh file_search de giu UX bang ket qua.
+        return reasoningScore > fileScore ? "reasoning" : "file_search";
+    }
+
+    private bool LooksLikeFileRequest(string query)
+    {
+        var normalized = NormalizeTextForIntent(query);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return false;
+        if (Regex.IsMatch(normalized, @"\b(tbkt|tskt|gdn)\b", RegexOptions.IgnoreCase))
+            return true;
+        if (Regex.IsMatch(normalized, @"\.(pdf|docx?|xlsx?|pptx?|dwg|zip)\b", RegexOptions.IgnoreCase))
+            return true;
+        if (normalized.Contains("\\") || normalized.Contains("/") || normalized.Contains("duong dan"))
+            return true;
+        if (Regex.IsMatch(normalized, @"\b[a-z]{1,4}\s*\d{2,6}[a-z0-9\-]*\b", RegexOptions.IgnoreCase))
+            return true;
+
+        var defaultKeywords = new[] { "tim file", "mo file", "mo vi tri", "tai lieu", "tbkt", "gdn", "ten file", "folder" };
+        var configured = _intentRouterOptions.FileSearchKeywords ?? Array.Empty<string>();
+        return ContainsAnyKeyword(normalized, defaultKeywords) || ContainsAnyKeyword(normalized, configured);
+    }
+
+    private bool LooksLikeReasoningRequest(string query)
+    {
+        var normalized = NormalizeTextForIntent(query);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return false;
+
+        var defaultKeywords = new[]
+        {
+            "tinh toan", "uoc luong", "so sanh", "phan tich", "vi sao", "de xuat",
+            "giai thich", "tong hop", "du doan", "bao nhieu", "neu thi", "chi phi",
+            "thong so", "ky thuat", "noi dung", "chi tiet", "la gi"
+        };
+        var configured = _intentRouterOptions.ReasoningKeywords ?? Array.Empty<string>();
+        if (ContainsAnyKeyword(normalized, defaultKeywords) || ContainsAnyKeyword(normalized, configured))
+            return true;
+
+        return Regex.IsMatch(normalized, @"(\d+\s*[\+\-\*\/]\s*\d+)|\bty le\b|\bphan tram\b", RegexOptions.IgnoreCase);
+    }
+
+    private bool LooksLikeFileContentQuestion(string query)
+    {
+        var normalized = NormalizeTextForIntent(query);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return false;
+        var hasFileCode =
+            Regex.IsMatch(normalized, @"\b(tbkt|tskt|gdn)\b", RegexOptions.IgnoreCase)
+            || Regex.IsMatch(normalized, @"\b[a-z]{1,4}\s*\d{2,6}[a-z0-9\-]*\b", RegexOptions.IgnoreCase);
+        if (!hasFileCode)
+            return false;
+
+        var asksDetail =
+            ContainsAnyKeyword(normalized, new[] { "thong so", "ky thuat", "noi dung", "chi tiet", "la gi", "giai thich" });
+        return asksDetail;
+    }
+
+    private static bool ContainsAnyKeyword(string normalizedText, IEnumerable<string> keywords)
+    {
+        foreach (var kw in keywords)
+        {
+            var key = NormalizeTextForIntent(kw);
+            if (!string.IsNullOrWhiteSpace(key) && normalizedText.Contains(key, StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
+    private static string NormalizeTextForIntent(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+        var formD = value.ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        var chars = formD.Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark).ToArray();
+        return new string(chars).Normalize(NormalizationForm.FormC);
     }
 
     // GET: api/Files

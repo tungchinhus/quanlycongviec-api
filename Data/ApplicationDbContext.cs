@@ -1,13 +1,22 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using quanlyfilesBE.Helpers;
 using quanlyfilesBE.Models;
+using System.Security.Claims;
 
 namespace quanlyfilesBE.Data;
 
 public class ApplicationDbContext : DbContext
 {
-    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+    private readonly IHttpContextAccessor _httpContextAccessor;
+
+    public ApplicationDbContext(
+        DbContextOptions<ApplicationDbContext> options,
+        IHttpContextAccessor httpContextAccessor)
         : base(options)
     {
+        _httpContextAccessor = httpContextAccessor;
     }
 
     public DbSet<FileItem> Files { get; set; }
@@ -38,6 +47,8 @@ public class ApplicationDbContext : DbContext
     public DbSet<HoSoThau> HoSoThau { get; set; }
     /// <summary>Máy sửa chữa - ghi nhận TNTT máy sửa chữa theo năm.</summary>
     public DbSet<MaySuaChua> MaySuaChua { get; set; }
+    /// <summary>Báo cáo công tác tuần (theo mẫu Excel), mỗi user các bản ghi riêng.</summary>
+    public DbSet<BaoCaoTuan> BaoCaoTuan { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -720,7 +731,159 @@ public class ApplicationDbContext : DbContext
             entity.HasIndex(e => e.Nam);
         });
 
+        modelBuilder.Entity<BaoCaoTuan>(entity =>
+        {
+            entity.ToTable("BaoCaoTuan");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd().HasColumnType("int");
+            entity.Property(e => e.TuanBaoCao).IsRequired().HasMaxLength(100).HasColumnType("nvarchar(100)");
+            entity.Property(e => e.NguoiLap).HasMaxLength(200).HasColumnType("nvarchar(200)");
+            entity.Property(e => e.NguoiCapNhat).HasMaxLength(200).HasColumnType("nvarchar(200)");
+            entity.Property(e => e.RowsJson).IsRequired().HasColumnType("nvarchar(max)");
+            entity.Property(e => e.NgayLap).HasColumnType("date");
+            entity.Property(e => e.CreatedAt).HasColumnType("datetime2");
+            entity.Property(e => e.UpdatedAt).HasColumnType("datetime2");
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.CapNhatBoiUser)
+                .WithMany()
+                .HasForeignKey(e => e.CapNhatBoiUserId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasIndex(e => new { e.UserId, e.TuanBaoCao }).IsUnique();
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.CapNhatBoiUserId);
+        });
+
+        // ---- Audit columns (CreatedAt, UpdatedAt, UpdatedBy) ----
+        // Tạo shadow properties cho các entity còn thiếu để đảm bảo:
+        // - mọi Add/Update qua EF Core đều ghi thời gian và user cập nhật
+        // - giảm công sửa DTO/model ở nhiều màn hình
+        var auditEntityTypes = new[]
+        {
+            typeof(FileItem),
+            typeof(Folder),
+            typeof(User),
+            typeof(Role),
+            typeof(Permission),
+            typeof(UserRole),
+            typeof(RolePermission),
+            typeof(PagePermission),
+            typeof(UserPagePermission),
+            typeof(Setting),
+            typeof(TechnicalSheet),
+            typeof(MachineAssignment),
+            typeof(AssignmentApproval),
+            typeof(TechnicalSheetApproval),
+            typeof(WorkChange),
+            typeof(WorkItem),
+            typeof(TechnicalNotification),
+            typeof(Notification),
+            typeof(TSMay),
+            typeof(ApprovalWorkflow),
+            typeof(IndexedFile),
+            typeof(TiepNhanThongTin),
+            typeof(HoSoThau),
+            typeof(MaySuaChua)
+        };
+
+        foreach (var entityType in auditEntityTypes)
+        {
+            var entityBuilder = modelBuilder.Entity(entityType);
+
+            if (entityType.GetProperty("CreatedAt") == null)
+            {
+                entityBuilder.Property<DateTime?>("CreatedAt")
+                    .HasColumnType("datetime2");
+            }
+
+            if (entityType.GetProperty("UpdatedAt") == null)
+            {
+                entityBuilder.Property<DateTime?>("UpdatedAt")
+                    .HasColumnType("datetime2");
+            }
+
+            if (entityType.GetProperty("UpdatedBy") == null)
+            {
+                entityBuilder.Property<string?>("UpdatedBy")
+                    .HasMaxLength(200)
+                    .HasColumnType("nvarchar(200)");
+            }
+        }
+
         // Seed initial admin role and permission if table is empty at migration time handled separately
+    }
+
+    public override int SaveChanges()
+    {
+        StampAuditColumns();
+        return base.SaveChanges();
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        StampAuditColumns();
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    private void StampAuditColumns()
+    {
+        ChangeTracker.DetectChanges();
+
+        var now = DateTimeHelper.NowVietnam();
+        var currentUserName = GetCurrentUserName();
+
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (entry.State != EntityState.Added && entry.State != EntityState.Modified)
+            {
+                continue;
+            }
+
+            // CreatedAt: chỉ set khi insert (Added)
+            if (entry.State == EntityState.Added)
+            {
+                var createdAtProp = entry.Properties.FirstOrDefault(p => p.Metadata.Name == "CreatedAt");
+                if (createdAtProp != null)
+                {
+                    var val = createdAtProp.CurrentValue;
+                    var shouldSet = val == null || (val is DateTime dt && dt == default);
+                    if (shouldSet)
+                    {
+                        createdAtProp.CurrentValue = now;
+                    }
+                }
+            }
+
+            // UpdatedAt/UpdatedBy: set cả khi Added và Modified để phản ánh lần ghi gần nhất
+            var updatedAtProp = entry.Properties.FirstOrDefault(p => p.Metadata.Name == "UpdatedAt");
+            if (updatedAtProp != null)
+            {
+                updatedAtProp.CurrentValue = now;
+            }
+
+            var updatedByProp = entry.Properties.FirstOrDefault(p => p.Metadata.Name == "UpdatedBy");
+            if (updatedByProp != null)
+            {
+                updatedByProp.CurrentValue = string.IsNullOrWhiteSpace(currentUserName)
+                    ? null
+                    : currentUserName;
+            }
+        }
+    }
+
+    private string? GetCurrentUserName()
+    {
+        // JWT token map: ClaimTypes.Name => UserName => User.Identity?.Name
+        var user = _httpContextAccessor.HttpContext?.User;
+        var name = user?.Identity?.Name;
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            return name;
+        }
+
+        return user?.FindFirst(ClaimTypes.Name)?.Value;
     }
 }
 

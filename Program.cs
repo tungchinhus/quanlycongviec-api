@@ -2,8 +2,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using Microsoft.Extensions.Options;
 using quanlyfilesBE.Data;
 using quanlyfilesBE.Models;
+using quanlyfilesBE.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,6 +28,8 @@ builder.Services.AddControllers()
     {
         options.SuppressModelStateInvalidFilter = true;
     });
+
+builder.Services.AddHttpContextAccessor();
 
 // Configure multipart form data limits for file uploads
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
@@ -153,12 +157,29 @@ builder.Services.AddSingleton<quanlyfilesBE.Services.IFileLoggerService, quanlyf
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<quanlyfilesBE.Services.IPowerAutomateService, quanlyfilesBE.Services.PowerAutomateService>();
 
+// Register OneDrive integration service (via Power Automate HTTP flows)
+builder.Services.AddScoped<quanlyfilesBE.Services.IOneDriveService, quanlyfilesBE.Services.OneDriveService>();
+
+builder.Services.AddScoped<quanlyfilesBE.Services.BaoCaoTuanExcelExportService>();
+
 // Add SignalR
 builder.Services.AddSignalR();
 
 // Configure FileStorage options
 builder.Services.Configure<FileStorageOptions>(
     builder.Configuration.GetSection(FileStorageOptions.SectionName));
+
+builder.Services.Configure<SemanticSearchOptions>(
+    builder.Configuration.GetSection(SemanticSearchOptions.SectionName));
+builder.Services.Configure<IntentRouterOptions>(
+    builder.Configuration.GetSection(IntentRouterOptions.SectionName));
+builder.Services.Configure<GemmaReasoningOptions>(
+    builder.Configuration.GetSection(GemmaReasoningOptions.SectionName));
+builder.Services.AddHttpClient<ISemanticSearchService, SemanticSearchService>((sp, client) =>
+{
+    var opts = sp.GetRequiredService<IOptions<SemanticSearchOptions>>().Value;
+    client.Timeout = TimeSpan.FromSeconds(Math.Max(30, opts.HttpTimeoutSeconds));
+});
 
 var app = builder.Build();
 
